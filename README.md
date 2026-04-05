@@ -1,6 +1,7 @@
 # Access Explorer
 
-> Desarrollado por **luna-soft** — Explora y edita bases de datos Microsoft Access (.accdb / .mdb) directamente desde VS Code.
+> Creado por **[Juanjo Luna](https://blog.luna-soft.es/)** · [luna-soft](https://blog.luna-soft.es/) · [LinkedIn](https://www.linkedin.com/in/luna-soft/) · [GitHub](https://github.com/lunasoft2001)  
+> Explora y edita bases de datos Microsoft Access (.accdb / .mdb) directamente desde VS Code.
 
 ---
 
@@ -25,13 +26,16 @@
 | Windows | Requerido por Microsoft Access |
 | Microsoft Access | 2016 o superior |
 | Python 3.9+ | Necesario para el servidor MCP |
-| [MCP-Access](https://github.com/modelcontextprotocol/servers) | Servidor MCP local para Access |
+| [MCP-Access](https://github.com/unmateria/MCP-Access) | Servidor MCP externo (proceso Python) que la extensión lanza automáticamente |
 
 ### Instalar MCP-Access
 
+Clona o descarga el servidor desde [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
+
 ```powershell
-pip install mcp-access
-# o clona el repositorio y usa: pip install -e .
+git clone https://github.com/unmateria/MCP-Access.git
+cd MCP-Access
+pip install -e .
 ```
 
 ---
@@ -89,5 +93,9 @@ Una vez instalada la extensión, configura en **Settings** de VS Code (`Ctrl+,`)
 
 ## Créditos
 
-Desarrollado por **luna-soft**.  
-Basado en el protocolo [Model Context Protocol (MCP)](https://modelcontextprotocol.io) y el servidor [MCP-Access](https://github.com/modelcontextprotocol/servers).
+**Access Explorer** es una extensión desarrollada por [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
+
+Esta extensión utiliza **[MCP-Access](https://github.com/unmateria/MCP-Access)** como servidor backend para comunicarse con Microsoft Access.  
+MCP-Access es un proyecto independiente distribuido bajo su propia licencia. Todos los derechos sobre MCP-Access pertenecen a sus respectivos autores.
+
+Protocolo de comunicación: [Model Context Protocol (MCP)](https://modelcontextprotocol.io).

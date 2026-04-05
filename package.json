@@ -5,8 +5,9 @@
     "version": "0.0.1",
     "publisher": "luna-soft",
     "author": {
-        "name": "luna-soft",
-        "url": "https://luna-soft.com"
+        "name": "Juanjo Luna",
+        "email": "juanjo@luna-soft.es",
+        "url": "https://blog.luna-soft.es/"
     },
     "engines": {
         "vscode": "^1.92.0"
