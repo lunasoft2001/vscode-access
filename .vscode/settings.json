@@ -1,0 +1,6 @@
+{
+    "accessExplorer.mcp.pythonCommand": "C:\\Users\\juanjo_admin\\mcp-servers\\.venv\\Scripts\\python.exe",
+    "accessExplorer.mcp.serverScriptPath": "C:\\Users\\juanjo_admin\\mcp-servers\\MCP-Access\\access_mcp_server.py",
+    "accessExplorer.mcp.toolPrefix": "access",
+    "accessExplorer.mcp.requestTimeoutMs": 30000
+}

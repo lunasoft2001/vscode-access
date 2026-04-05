@@ -1,0 +1,237 @@
+{
+    "name": "access-explorer",
+    "displayName": "%extension.displayName%",
+    "description": "%extension.description%",
+    "version": "0.0.1",
+    "publisher": "luna-soft",
+    "author": {
+        "name": "luna-soft",
+        "url": "https://luna-soft.com"
+    },
+    "engines": {
+        "vscode": "^1.92.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Other"
+    ],
+    "activationEvents": [],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "accessExplorer",
+                    "title": "%viewsContainer.title%",
+                    "icon": "media/access.svg"
+                }
+            ]
+        },
+        "views": {
+            "accessExplorer": [
+                {
+                    "id": "accessExplorerView",
+                    "name": "%view.databases.name%",
+                    "icon": "media/access.svg"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "accessExplorer.addConnection",
+                "title": "%command.addConnection.title%",
+                "icon": "$(add)"
+            },
+            {
+                "command": "accessExplorer.removeConnection",
+                "title": "%command.removeConnection.title%",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "accessExplorer.refresh",
+                "title": "%command.refresh.title%",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "accessExplorer.reconnect",
+                "title": "%command.reconnect.title%",
+                "icon": "$(debug-restart)"
+            },
+            {
+                "command": "accessExplorer.restartAccessProcesses",
+                "title": "%command.restartProcesses.title%",
+                "icon": "$(debug-disconnect)"
+            },
+            {
+                "command": "accessExplorer.searchObjects",
+                "title": "%command.searchObjects.title%",
+                "icon": "$(search)"
+            },
+            {
+                "command": "accessExplorer.showDetails",
+                "title": "%command.showDetails.title%"
+            },
+            {
+                "command": "accessExplorer.runSqlQuery",
+                "title": "%command.runSqlQuery.title%",
+                "icon": "$(play)"
+            },
+            {
+                "command": "accessExplorer.executeActiveSql",
+                "title": "%command.executeActiveSql.title%",
+                "icon": "$(run-all)"
+            },
+            {
+                "command": "accessExplorer.openSqlEditor",
+                "title": "%command.openSqlEditor.title%",
+                "icon": "$(new-file)"
+            },
+            {
+                "command": "accessExplorer.pickSqlConnection",
+                "title": "%command.pickSqlConnection.title%",
+                "icon": "$(database)"
+            },
+            {
+                "command": "accessExplorer.saveCodeToAccess",
+                "title": "%command.saveCodeToAccess.title%",
+                "icon": "$(cloud-upload)"
+            },
+            {
+                "command": "accessExplorer.compileVba",
+                "title": "%command.compileVba.title%",
+                "icon": "$(check)"
+            },
+            {
+                "command": "accessExplorer.compactRepair",
+                "title": "%command.compactRepair.title%",
+                "icon": "$(wrench)"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "accessExplorer.addConnection",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "accessExplorer.refresh",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "accessExplorer.restartAccessProcesses",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "accessExplorer.searchObjects",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@4"
+                },
+                {
+                    "command": "accessExplorer.runSqlQuery",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@5"
+                },
+                {
+                    "command": "accessExplorer.openSqlEditor",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@6"
+                }
+            ],
+            "editor/title": [
+                {
+                    "command": "accessExplorer.executeActiveSql",
+                    "when": "editorLangId == sql",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "accessExplorer.pickSqlConnection",
+                    "when": "editorLangId == sql",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "accessExplorer.saveCodeToAccess",
+                    "when": "editorLangId == vb",
+                    "group": "navigation@1"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "accessExplorer.refresh",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "inline"
+                },
+                {
+                    "command": "accessExplorer.reconnect",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "inline"
+                },
+                {
+                    "command": "accessExplorer.removeConnection",
+                    "when": "view == accessExplorerView && viewItem == accessConnection"
+                },
+                {
+                    "command": "accessExplorer.compileVba",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@1"
+                },
+                {
+                    "command": "accessExplorer.compactRepair",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@2"
+                },
+                {
+                    "command": "accessExplorer.showDetails",
+                    "when": "view == accessExplorerView && viewItem == accessObject"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "%configuration.title%",
+            "properties": {
+                "accessExplorer.mcp.pythonCommand": {
+                    "type": "string",
+                    "default": "python",
+                    "description": "%config.pythonCommand.description%"
+                },
+                "accessExplorer.mcp.serverScriptPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "%config.serverScriptPath.description%"
+                },
+                "accessExplorer.mcp.toolPrefix": {
+                    "type": "string",
+                    "default": "access",
+                    "description": "%config.toolPrefix.description%"
+                },
+                "accessExplorer.mcp.requestTimeoutMs": {
+                    "type": "number",
+                    "default": 30000,
+                    "minimum": 1000,
+                    "description": "%config.requestTimeoutMs.description%"
+                },
+                "accessExplorer.mcp.sqlQueryTimeoutMs": {
+                    "type": "number",
+                    "default": 600000,
+                    "minimum": 5000,
+                    "description": "%config.sqlQueryTimeoutMs.description%"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "vscode:prepublish": "npm run compile"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.18.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.14.8",
+        "@types/vscode": "^1.92.0",
+        "typescript": "^5.5.4"
+    }
+}
