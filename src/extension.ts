@@ -118,6 +118,69 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.showMcpRuntime", async () => {
+            try {
+                const info = await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: "Resolviendo runtime MCP...",
+                        cancellable: false
+                    },
+                    async () => await mcpClient.getMcpRuntimeInfo()
+                );
+
+                const summary = [
+                    `Python: ${info.pythonCommand}`,
+                    `Script MCP: ${info.resolvedServerScriptPath}`,
+                    `Runtime gestionado: ${info.managedBaseDir}`
+                ].join("\n");
+
+                const action = await vscode.window.showInformationMessage(
+                    "Runtime MCP de Access Explorer resuelto.",
+                    "Copiar bloque mcp.json",
+                    "Abrir carpeta runtime",
+                    "Ver detalle"
+                );
+
+                if (action === "Copiar bloque mcp.json") {
+                    await vscode.env.clipboard.writeText(info.mcpJsonSnippet);
+                    vscode.window.showInformationMessage("Bloque mcp.json copiado al portapapeles.");
+                    return;
+                }
+
+                if (action === "Abrir carpeta runtime") {
+                    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(info.managedBaseDir));
+                    return;
+                }
+
+                if (action === "Ver detalle") {
+                    const doc = await vscode.workspace.openTextDocument({
+                        language: "json",
+                        content: JSON.stringify(
+                            {
+                                runtime: {
+                                    pythonCommand: info.pythonCommand,
+                                    resolvedServerScriptPath: info.resolvedServerScriptPath,
+                                    managedBaseDir: info.managedBaseDir,
+                                    managedServerScriptPath: info.managedServerScriptPath
+                                },
+                                mcpJsonSnippet: JSON.parse(info.mcpJsonSnippet)
+                            },
+                            null,
+                            2
+                        )
+                    });
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                    vscode.window.showInformationMessage(summary);
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`No se pudo resolver el runtime MCP: ${message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.searchObjects", async () => {
             const connections = connectionStore.getAll();
             if (connections.length === 0) {

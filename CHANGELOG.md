@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.14 - 2026-04-06
+
+- Added `Access: Show MCP Runtime` command to make runtime paths visible from the extension UI.
+- Added one-click actions to copy a ready-to-use `mcp.json` snippet and open the managed runtime folder.
+- Added runtime diagnostics view with resolved Python command and MCP server script path.
+
 ## 1.0.13 - 2026-04-06
 
 - Added automatic detection and installation of `Pillow` when `from PIL import Image` fails during screenshot operations.

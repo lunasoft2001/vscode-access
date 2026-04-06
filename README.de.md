@@ -107,6 +107,8 @@ Nach der Installation in den VS Code **Einstellungen** konfigurieren (`Ctrl+,`):
 Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
 Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.0.14**: Fuegt den Befehl `Access: MCP-Runtime anzeigen` mit kopierbarem `mcp.json`-Block und Runtime-Ordner-Ansicht hinzu.
+- **v1.0.13**: Installiert `Pillow` automatisch bei fehlendem PIL fuer Screenshots; gefuehrter Reparaturablauf bei fehlendem `mcp_access`-Modul.
 - **v1.0.12**: Aktiviert den VBA-Zugriff im Access Trust Center (`AccessVBOM`) beim Setup automatisch (best effort).
 - **v1.0.11**: Verwendet standardmäßig einen von der Erweiterung verwalteten MCP-Runtime-Speicher (`globalStorage`).
 - **v1.0.10**: Fügt ZIP-Fallback für MCP-Access hinzu, wenn Git nicht verfügbar ist.

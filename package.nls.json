@@ -9,6 +9,7 @@
     "command.refresh.title": "Access: Refresh",
     "command.reconnect.title": "Access: Reconnect MCP",
     "command.restartProcesses.title": "Access: Restart Access Processes",
+    "command.showMcpRuntime.title": "Access: Show MCP Runtime",
     "command.searchObjects.title": "Access: Search Objects",
     "command.showDetails.title": "Access: Show Object Details",
     "command.runSqlQuery.title": "Access: Run SQL Query",

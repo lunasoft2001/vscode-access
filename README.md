@@ -108,6 +108,7 @@ This README now includes a short release summary for quick overview.
 For full details, see [CHANGELOG.md](CHANGELOG.md).
 
 - **v1.0.13**: Auto-installs `Pillow` when PIL is missing for screenshots; guided repair flow when `mcp_access` module is absent.
+- **v1.0.14**: Adds `Access: Show MCP Runtime` command with copy-ready `mcp.json` snippet and runtime folder reveal.
 - **v1.0.12**: Auto-enables Access Trust Center VBA access (`AccessVBOM`) during setup (best effort).
 - **v1.0.11**: Uses extension-managed MCP runtime storage (`globalStorage`) by default.
 - **v1.0.10**: Adds MCP-Access ZIP fallback when Git is unavailable.

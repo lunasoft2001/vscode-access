@@ -46,6 +46,14 @@ interface PrerequisiteState {
     serverScriptPath: string;
 }
 
+export interface McpRuntimeInfo {
+    managedBaseDir: string;
+    managedServerScriptPath: string;
+    resolvedServerScriptPath: string;
+    pythonCommand: string;
+    mcpJsonSnippet: string;
+}
+
 export class McpAccessClient {
     private client: Client | undefined;
     private transport: StdioClientTransport | undefined;
@@ -74,6 +82,48 @@ export class McpAccessClient {
 
     async ensurePrerequisites(): Promise<void> {
         await this.getOrCreatePrerequisiteCheck();
+    }
+
+    async getMcpRuntimeInfo(): Promise<McpRuntimeInfo> {
+        const cfg = this.getConfig();
+        const managedBaseDir = this.getManagedRuntimeBaseDir();
+        const managedServerScriptPath = path.join(managedBaseDir, "MCP-Access", "access_mcp_server.py");
+
+        let pythonCommand = cfg.get<string>("mcp.pythonCommand", "python").trim() || "python";
+        let resolvedServerScriptPath = managedServerScriptPath;
+
+        try {
+            const prerequisites = await this.getOrCreatePrerequisiteCheck();
+            pythonCommand = prerequisites.pythonCommand;
+            resolvedServerScriptPath = prerequisites.serverScriptPath;
+        } catch {
+            try {
+                resolvedServerScriptPath = this.resolveServerScriptPath(cfg);
+            } catch {
+                // keep managed default path in diagnostics
+            }
+        }
+
+        const mcpJsonSnippet = JSON.stringify(
+            {
+                servers: {
+                    "access-explorer-local": {
+                        command: pythonCommand,
+                        args: [resolvedServerScriptPath]
+                    }
+                }
+            },
+            null,
+            2
+        );
+
+        return {
+            managedBaseDir,
+            managedServerScriptPath,
+            resolvedServerScriptPath,
+            pythonCommand,
+            mcpJsonSnippet
+        };
     }
 
     async disconnect(): Promise<void> {

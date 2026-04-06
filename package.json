@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.0.13",
+    "version": "1.0.14",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
@@ -29,6 +29,7 @@
         "onCommand:accessExplorer.removeConnection",
         "onCommand:accessExplorer.refresh",
         "onCommand:accessExplorer.reconnect",
+        "onCommand:accessExplorer.showMcpRuntime",
         "onCommand:accessExplorer.restartAccessProcesses",
         "onCommand:accessExplorer.searchObjects",
         "onCommand:accessExplorer.showDetails",
@@ -85,6 +86,11 @@
                 "command": "accessExplorer.restartAccessProcesses",
                 "title": "%command.restartProcesses.title%",
                 "icon": "$(debug-disconnect)"
+            },
+            {
+                "command": "accessExplorer.showMcpRuntime",
+                "title": "%command.showMcpRuntime.title%",
+                "icon": "$(server-process)"
             },
             {
                 "command": "accessExplorer.searchObjects",
@@ -154,14 +160,19 @@
                     "group": "navigation@4"
                 },
                 {
-                    "command": "accessExplorer.runSqlQuery",
+                    "command": "accessExplorer.showMcpRuntime",
                     "when": "view == accessExplorerView",
                     "group": "navigation@5"
                 },
                 {
-                    "command": "accessExplorer.openSqlEditor",
+                    "command": "accessExplorer.runSqlQuery",
                     "when": "view == accessExplorerView",
                     "group": "navigation@6"
+                },
+                {
+                    "command": "accessExplorer.openSqlEditor",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@7"
                 }
             ],
             "editor/title": [
