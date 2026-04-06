@@ -101,3 +101,16 @@ Esta extensión utiliza **[MCP-Access](https://github.com/unmateria/MCP-Access)*
 MCP-Access es un proyecto independiente distribuido bajo su propia licencia. Todos los derechos sobre MCP-Access pertenecen a sus respectivos autores.
 
 Protocolo de comunicación: [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
+
+---
+
+## Licencia
+
+© 2026 Juanjo Luna — [luna-soft](https://blog.luna-soft.es/)
+
+Esta extensión se distribuye bajo la licencia **[Polyform Noncommercial License 1.0.0](LICENSE)**.
+
+**Gratuita para uso personal, educativo y no comercial.**  
+**El uso comercial** (incluyendo la integración en productos o servicios comerciales, o el uso por parte de una entidad con ánimo de lucro) **requiere una licencia comercial escrita del autor**.
+
+Para consultar licencias comerciales, contacta con: [juanjo@luna-soft.es](mailto:juanjo@luna-soft.es)

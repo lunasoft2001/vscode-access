@@ -101,3 +101,16 @@ Diese Erweiterung verwendet **[MCP-Access](https://github.com/unmateria/MCP-Acce
 MCP-Access ist ein unabhängiges Projekt unter eigener Lizenz. Alle Rechte liegen bei den jeweiligen Autoren.
 
 Kommunikationsprotokoll: [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
+
+---
+
+## Lizenz
+
+© 2026 Juanjo Luna — [luna-soft](https://blog.luna-soft.es/)
+
+Diese Erweiterung ist lizenziert unter der **[Polyform Noncommercial License 1.0.0](LICENSE)**.
+
+**Kostenlos für persönliche, bildungsbezogene und nicht-kommerzielle Nutzung.**  
+**Kommerzielle Nutzung** (einschließlich der Integration in kommerzielle Produkte oder Dienste oder der Nutzung durch eine gewinnorientierte Einheit) **erfordert eine separate schriftliche kommerzielle Lizenz** des Autors.
+
+Für Anfragen zur kommerziellen Lizenzierung wenden Sie sich an: [juanjo@luna-soft.es](mailto:juanjo@luna-soft.es)

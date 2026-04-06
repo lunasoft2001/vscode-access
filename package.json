@@ -14,7 +14,7 @@
         "url": "https://github.com/lunasoft2001/vscode-access.git"
     },
     "homepage": "https://github.com/lunasoft2001/vscode-access#readme",
-    "license": "MIT",
+    "license": "SEE LICENSE IN LICENSE",
     "engines": {
         "vscode": "^1.92.0"
     },
