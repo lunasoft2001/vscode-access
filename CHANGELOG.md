@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.10 - 2026-04-06
+
+- Improved MCP-Access auto-installation for machines without Git.
+- Added fallback download via ZIP from GitHub when `git clone` is unavailable or fails.
+- Reduced cases where users had to install MCP-Access manually.
+
 ## 1.0.9 - 2026-04-06
 
 - Added forced prerequisite validation when the extension activates.

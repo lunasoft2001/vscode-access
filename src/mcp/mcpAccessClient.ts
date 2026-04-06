@@ -792,17 +792,31 @@ export class McpAccessClient {
         await fs.promises.mkdir(baseDir, { recursive: true });
 
         const gitAvailable = await this.commandAvailable("git", ["--version"]);
-        if (!gitAvailable) {
-            throw new Error("No se encontró Git en PATH. Instálalo para poder descargar MCP-Access automáticamente.");
-        }
-
         if (!fs.existsSync(repoDir)) {
-            await this.runCommand("git", ["clone", "https://github.com/unmateria/MCP-Access.git", repoDir]);
-        } else {
+            if (gitAvailable) {
+                const clone = await this.runCommand(
+                    "git",
+                    ["clone", "https://github.com/unmateria/MCP-Access.git", repoDir],
+                    undefined,
+                    true
+                );
+                if (clone.exitCode !== 0) {
+                    this.output.appendLine(
+                        `Aviso: git clone falló. Se intentará descarga ZIP. ${clone.stderr || clone.stdout}`
+                    );
+                    await this.downloadMcpAccessZip(baseDir, repoDir);
+                }
+            } else {
+                this.output.appendLine("Git no está disponible. Se intentará descarga ZIP de MCP-Access.");
+                await this.downloadMcpAccessZip(baseDir, repoDir);
+            }
+        } else if (gitAvailable) {
             const pull = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
             if (pull.exitCode !== 0) {
                 this.output.appendLine(`Aviso: no se pudo actualizar MCP-Access con git pull. ${pull.stderr}`);
             }
+        } else {
+            this.output.appendLine("MCP-Access ya existe localmente; Git no disponible para actualizar.");
         }
 
         const bootstrapPython = await this.detectPythonBootstrapCommand();
@@ -871,6 +885,27 @@ export class McpAccessClient {
         if (!fs.existsSync(serverScriptPath)) {
             throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
         }
+    }
+
+    private async downloadMcpAccessZip(baseDir: string, repoDir: string): Promise<void> {
+        const tempZip = path.join(baseDir, `mcp-access-main-${Date.now()}.zip`);
+        const extractedDir = path.join(baseDir, "MCP-Access-main");
+
+        const script = [
+            `$base='${escapePowerShellString(baseDir)}'`,
+            `$zip='${escapePowerShellString(tempZip)}'`,
+            `$repo='${escapePowerShellString(repoDir)}'`,
+            "$url='https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip'",
+            "Invoke-WebRequest -Uri $url -OutFile $zip",
+            "if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }",
+            `if (Test-Path -LiteralPath '${escapePowerShellString(extractedDir)}') { Remove-Item -LiteralPath '${escapePowerShellString(extractedDir)}' -Recurse -Force }`,
+            "Expand-Archive -LiteralPath $zip -DestinationPath $base -Force",
+            `if (!(Test-Path -LiteralPath '${escapePowerShellString(extractedDir)}')) { throw 'No se encontró carpeta extraída MCP-Access-main.' }`,
+            "Rename-Item -LiteralPath $extractedDir -NewName 'MCP-Access' -Force",
+            "Remove-Item -LiteralPath $zip -Force"
+        ].join("; ");
+
+        await this.runCommand("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
     }
 
     private async detectPythonBootstrapCommand(): Promise<PythonBootstrapCommand> {
@@ -1547,6 +1582,10 @@ export class McpAccessClient {
 
 function escapePythonString(value: string): string {
     return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function escapePowerShellString(value: string): string {
+    return value.replace(/'/g, "''");
 }
 
 function toNumber(value: unknown): number | undefined {
