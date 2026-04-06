@@ -22,7 +22,23 @@
         "Programming Languages",
         "Other"
     ],
-    "activationEvents": [],
+    "activationEvents": [
+        "onView:accessExplorerView",
+        "onCommand:accessExplorer.addConnection",
+        "onCommand:accessExplorer.removeConnection",
+        "onCommand:accessExplorer.refresh",
+        "onCommand:accessExplorer.reconnect",
+        "onCommand:accessExplorer.restartAccessProcesses",
+        "onCommand:accessExplorer.searchObjects",
+        "onCommand:accessExplorer.showDetails",
+        "onCommand:accessExplorer.runSqlQuery",
+        "onCommand:accessExplorer.executeActiveSql",
+        "onCommand:accessExplorer.openSqlEditor",
+        "onCommand:accessExplorer.pickSqlConnection",
+        "onCommand:accessExplorer.saveCodeToAccess",
+        "onCommand:accessExplorer.compileVba",
+        "onCommand:accessExplorer.compactRepair"
+    ],
     "main": "./dist/extension.js",
     "contributes": {
         "viewsContainers": {
