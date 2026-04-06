@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.7 - 2026-04-06
+
+- Fixed MCP-Access auto-install when repository is not pip-installable in editable mode (`pip install -e`).
+- Added fallback to install dependencies from `requirements*.txt` files.
+- Improved diagnostics text with manual alternative for non-packaged repositories.
+
 ## 1.0.6 - 2026-04-06
 
 - Added automatic MCP-Access prerequisite detection when `access_mcp_server.py` is missing.

@@ -783,7 +783,58 @@ export class McpAccessClient {
         }
 
         await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
-        await this.runCommand(venvPython, ["-m", "pip", "install", "-e", repoDir]);
+
+        // Algunos forks de MCP-Access no son instalables con -e (sin setup.py/pyproject.toml).
+        // En ese caso intentamos instalar dependencias desde requirements*.txt y continuamos.
+        const editableInstall = await this.runCommand(
+            venvPython,
+            ["-m", "pip", "install", "-e", repoDir],
+            undefined,
+            true
+        );
+
+        if (editableInstall.exitCode !== 0) {
+            this.output.appendLine(
+                "Aviso: pip install -e falló. Se intentará instalación por requirements*.txt."
+            );
+            this.output.appendLine(`Detalle: ${editableInstall.stderr || editableInstall.stdout}`);
+
+            const requirementCandidates = [
+                path.join(repoDir, "requirements.txt"),
+                path.join(repoDir, "requirements-dev.txt"),
+                path.join(repoDir, "requirements_mcp.txt")
+            ];
+
+            let requirementsInstalled = false;
+            for (const reqFile of requirementCandidates) {
+                if (!fs.existsSync(reqFile)) {
+                    continue;
+                }
+
+                const reqInstall = await this.runCommand(
+                    venvPython,
+                    ["-m", "pip", "install", "-r", reqFile],
+                    undefined,
+                    true
+                );
+
+                if (reqInstall.exitCode === 0) {
+                    requirementsInstalled = true;
+                    this.output.appendLine(`Dependencias instaladas desde: ${reqFile}`);
+                    break;
+                }
+
+                this.output.appendLine(
+                    `Aviso: instalación fallida desde ${reqFile}: ${reqInstall.stderr || reqInstall.stdout}`
+                );
+            }
+
+            if (!requirementsInstalled) {
+                this.output.appendLine(
+                    "No se encontró requirements válido; se continuará si el script del servidor existe."
+                );
+            }
+        }
 
         if (!fs.existsSync(serverScriptPath)) {
             throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
@@ -869,7 +920,8 @@ export class McpAccessClient {
             "cd MCP-Access",
             "py -3 -m venv .venv",
             ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
-            ".\\.venv\\Scripts\\python.exe -m pip install -e .",
+            ".\\.venv\\Scripts\\python.exe -m pip install -e .   # si existe setup.py/pyproject.toml",
+            ".\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt   # alternativa",
             "```",
             "",
             "Después, configura accessExplorer.mcp.serverScriptPath con la ruta de access_mcp_server.py si fuera necesario."
