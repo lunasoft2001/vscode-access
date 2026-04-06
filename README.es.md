@@ -28,6 +28,7 @@
 | Windows | Requerido por Microsoft Access |
 | Microsoft Access | 2016 o superior |
 | Python 3.9+ | Necesario para el servidor MCP |
+| Acceso VBA en Access | Activa `Trust access to the VBA project object model` en el Centro de confianza |
 | [MCP-Access](https://github.com/unmateria/MCP-Access) | Servidor MCP externo (proceso Python) que la extensión lanza automáticamente |
 
 ### Instalar MCP-Access
@@ -37,7 +38,15 @@ Clona o descarga el servidor desde [github.com/unmateria/MCP-Access](https://git
 ```powershell
 git clone https://github.com/unmateria/MCP-Access.git
 cd MCP-Access
-pip install -e .
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install mcp pywin32
+```
+
+En Microsoft Access activa:
+
+```text
+Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Trust access to the VBA project object model
 ```
 
 ---

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.8 - 2026-04-06
+
+- Fixed MCP-Access prerequisite setup to install the actual required Python packages: `mcp` and `pywin32`.
+- Added guided environment diagnostics that explain the required order: Python, Python packages, Microsoft Access, and Trust Center VBA access.
+- Improved connection failure messages for closed MCP server processes.
+- Updated README installation instructions to match the real MCP-Access setup.
+
 ## 1.0.7 - 2026-04-06
 
 - Fixed MCP-Access auto-install when repository is not pip-installable in editable mode (`pip install -e`).

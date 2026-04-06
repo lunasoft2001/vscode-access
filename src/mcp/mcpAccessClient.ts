@@ -46,6 +46,7 @@ export class McpAccessClient {
     private transport: StdioClientTransport | undefined;
     private readonly output: vscode.OutputChannel;
     private installPromptShown = false;
+    private environmentHelpShown = false;
 
     constructor(private readonly getConfig: () => vscode.WorkspaceConfiguration) {
         this.output = vscode.window.createOutputChannel("Access Explorer");
@@ -611,23 +612,24 @@ export class McpAccessClient {
             return;
         }
 
-        const cfg = this.getConfig();
-        const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
-        const pythonCommand = this.resolvePythonCommand(cfg, serverScriptPath);
-        await this.ensurePythonCommandAvailable(pythonCommand);
-
-        const transport = new StdioClientTransport({
-            command: pythonCommand,
-            args: [serverScriptPath],
-            stderr: "pipe"
-        });
-
-        const client = new Client(
-            { name: "access-explorer", version: "0.0.1" },
-            { capabilities: {} }
-        );
-
         try {
+            const cfg = this.getConfig();
+            const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+            const pythonCommand = this.resolvePythonCommand(cfg, serverScriptPath);
+            await this.ensurePythonCommandAvailable(pythonCommand);
+            await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+
+            const transport = new StdioClientTransport({
+                command: pythonCommand,
+                args: [serverScriptPath],
+                stderr: "pipe"
+            });
+
+            const client = new Client(
+                { name: "access-explorer", version: "0.0.1" },
+                { capabilities: {} }
+            );
+
             this.output.appendLine(`MCP connect -> python: ${pythonCommand}`);
             this.output.appendLine(`MCP connect -> script: ${serverScriptPath}`);
 
@@ -640,15 +642,10 @@ export class McpAccessClient {
             this.transport = transport;
             this.client = client;
         } catch (error) {
-            try {
-                await client.close();
-            } catch {
-                // ignore close failures during failed connect cleanup
-            }
-
-            const reason = error instanceof Error ? error.message : String(error);
+            const rawReason = error instanceof Error ? error.message : String(error);
+            const reason = this.enrichConnectError(rawReason);
             throw new Error(
-                `No se pudo conectar con MCP-Access. ${reason} | python=${pythonCommand} | script=${serverScriptPath}`
+                `No se pudo conectar con MCP-Access. ${reason}`
             );
         }
     }
@@ -783,6 +780,7 @@ export class McpAccessClient {
         }
 
         await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
+        await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32"]);
 
         // Algunos forks de MCP-Access no son instalables con -e (sin setup.py/pyproject.toml).
         // En ese caso intentamos instalar dependencias desde requirements*.txt y continuamos.
@@ -839,6 +837,8 @@ export class McpAccessClient {
         if (!fs.existsSync(serverScriptPath)) {
             throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
         }
+
+        await this.validateServerEnvironment(venvPython, serverScriptPath);
     }
 
     private async detectPythonBootstrapCommand(): Promise<PythonBootstrapCommand> {
@@ -878,10 +878,112 @@ export class McpAccessClient {
                 );
             }
 
+            await this.showEnvironmentHelp({
+                title: "Python no está disponible",
+                details: `No se puede ejecutar Python con '${pythonCommand}'.`,
+                steps: [
+                    "Instala Python 3.9 o superior.",
+                    "Marca la opción 'Add python.exe to PATH' durante la instalación.",
+                    "Reinicia VS Code después de instalar Python.",
+                    "Si ya está instalado, configura accessExplorer.mcp.pythonCommand con la ruta correcta."
+                ]
+            });
+
             throw new Error(
                 `No se puede ejecutar Python con '${pythonCommand}'. Revisa accessExplorer.mcp.pythonCommand.`
             );
         }
+    }
+
+    private async validateServerEnvironment(pythonCommand: string, serverScriptPath: string): Promise<void> {
+        const repoDir = path.dirname(serverScriptPath);
+        const importProbe = [
+            "import sys",
+            `sys.path.insert(0, r'${escapePythonString(repoDir)}')`,
+            "import mcp",
+            "import win32com.client",
+            "import mcp_access.server",
+            "print('ok')"
+        ].join("; ");
+
+        const result = await this.runCommand(
+            pythonCommand,
+            ["-c", importProbe],
+            undefined,
+            true
+        );
+
+        if (result.exitCode !== 0) {
+            const details = result.stderr || result.stdout || "Dependencias MCP-Access no disponibles.";
+            await this.showEnvironmentHelp({
+                title: "El entorno MCP-Access no está listo",
+                details,
+                steps: [
+                    "Verifica primero que Python 3.9+ esté instalado y funcione con 'py -3 --version' o 'python --version'.",
+                    "Instala las dependencias Python del servidor: 'pip install mcp pywin32'.",
+                    "Comprueba que Microsoft Access esté instalado en el equipo.",
+                    "En Access activa: Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Trust access to the VBA project object model.",
+                    `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${serverScriptPath}.`
+                ]
+            });
+            throw new Error(
+                "El entorno de MCP-Access no está listo. "
+                + "Comprueba que estén instalados los paquetes Python 'mcp' y 'pywin32'. "
+                + details
+            );
+        }
+    }
+
+    private enrichConnectError(reason: string): string {
+        const normalized = reason.toLowerCase();
+        if (normalized.includes("connection closed")) {
+            return [
+                "El proceso Python de MCP-Access se cerró al iniciar.",
+                "Orden recomendado de resolución: 1) instalar Python 3.9+, 2) instalar paquetes 'mcp' y 'pywin32', 3) comprobar que Microsoft Access está instalado, 4) activar 'Trust access to the VBA project object model' en Access."
+            ].join(" ");
+        }
+
+        return reason;
+    }
+
+    private async showEnvironmentHelp(options: {
+        title: string;
+        details: string;
+        steps: string[];
+    }): Promise<void> {
+        if (this.environmentHelpShown) {
+            return;
+        }
+        this.environmentHelpShown = true;
+
+        const content = [
+            `# ${options.title}`,
+            "",
+            "## Qué pasa",
+            "",
+            "```text",
+            options.details,
+            "```",
+            "",
+            "## Cómo solucionarlo",
+            "",
+            ...options.steps.map((step, index) => `${index + 1}. ${step}`),
+            "",
+            "## Instalación manual rápida",
+            "",
+            "```powershell",
+            "py -3 -m venv %USERPROFILE%\\mcp-servers\\.venv",
+            "%USERPROFILE%\\mcp-servers\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
+            "%USERPROFILE%\\mcp-servers\\.venv\\Scripts\\python.exe -m pip install mcp pywin32",
+            "```"
+        ].join("\n");
+
+        const doc = await vscode.workspace.openTextDocument({
+            content,
+            language: "markdown"
+        });
+
+        await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
     }
 
     private async showInstallFailureDiagnostics(details: string): Promise<void> {
@@ -905,7 +1007,10 @@ export class McpAccessClient {
             "",
             "1. Verificar que Git esté instalado y en PATH (comando: git --version).",
             "2. Verificar que Python 3.9+ esté instalado (comando: py -3 --version o python --version).",
-            "3. Comprobar permisos de escritura en la carpeta de instalación.",
+            "3. Verificar que estén instalados los paquetes Python 'mcp' y 'pywin32'.",
+            "4. Confirmar que Microsoft Access está instalado en el equipo.",
+            "5. Habilitar 'Trust access to the VBA project object model' en Access.",
+            "6. Comprobar permisos de escritura en la carpeta de instalación.",
             "",
             "## Rutas usadas por la instalación",
             "",
@@ -920,6 +1025,7 @@ export class McpAccessClient {
             "cd MCP-Access",
             "py -3 -m venv .venv",
             ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
+            ".\\.venv\\Scripts\\python.exe -m pip install mcp pywin32",
             ".\\.venv\\Scripts\\python.exe -m pip install -e .   # si existe setup.py/pyproject.toml",
             ".\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt   # alternativa",
             "```",
@@ -1284,6 +1390,10 @@ export class McpAccessClient {
         }
         return undefined;
     }
+}
+
+function escapePythonString(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function toNumber(value: unknown): number | undefined {
