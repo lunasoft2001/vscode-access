@@ -60,6 +60,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(treeView);
 
+    void vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: "Comprobando requisitos de Access Explorer...",
+            cancellable: false
+        },
+        async () => {
+            try {
+                await mcpClient.ensurePrerequisites();
+                treeProvider.refresh();
+            } catch {
+                // El cliente ya muestra diagnóstico y pasos de corrección.
+            }
+        }
+    );
+
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.refresh", async () => {
             treeProvider.refresh();

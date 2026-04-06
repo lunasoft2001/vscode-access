@@ -41,12 +41,19 @@ interface PythonBootstrapCommand {
     args: string[];
 }
 
+interface PrerequisiteState {
+    pythonCommand: string;
+    serverScriptPath: string;
+}
+
 export class McpAccessClient {
     private client: Client | undefined;
     private transport: StdioClientTransport | undefined;
     private readonly output: vscode.OutputChannel;
     private installPromptShown = false;
     private environmentHelpShown = false;
+    private prerequisiteCheckPromise: Promise<PrerequisiteState> | undefined;
+    private prerequisiteState: PrerequisiteState | undefined;
 
     constructor(private readonly getConfig: () => vscode.WorkspaceConfiguration) {
         this.output = vscode.window.createOutputChannel("Access Explorer");
@@ -59,6 +66,10 @@ export class McpAccessClient {
     async reconnect(): Promise<void> {
         await this.disconnect();
         await this.connect();
+    }
+
+    async ensurePrerequisites(): Promise<void> {
+        await this.getOrCreatePrerequisiteCheck();
     }
 
     async disconnect(): Promise<void> {
@@ -613,11 +624,7 @@ export class McpAccessClient {
         }
 
         try {
-            const cfg = this.getConfig();
-            const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
-            const pythonCommand = this.resolvePythonCommand(cfg, serverScriptPath);
-            await this.ensurePythonCommandAvailable(pythonCommand);
-            await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+            const { pythonCommand, serverScriptPath } = await this.getOrCreatePrerequisiteCheck();
 
             const transport = new StdioClientTransport({
                 command: pythonCommand,
@@ -648,6 +655,33 @@ export class McpAccessClient {
                 `No se pudo conectar con MCP-Access. ${reason}`
             );
         }
+    }
+
+    private getOrCreatePrerequisiteCheck(): Promise<PrerequisiteState> {
+        if (this.prerequisiteState) {
+            return Promise.resolve(this.prerequisiteState);
+        }
+
+        if (!this.prerequisiteCheckPromise) {
+            this.prerequisiteCheckPromise = this.runPrerequisiteCheck()
+                .then((state) => {
+                    this.prerequisiteState = state;
+                    return state;
+                })
+                .finally(() => {
+                    this.prerequisiteCheckPromise = undefined;
+                });
+        }
+
+        return this.prerequisiteCheckPromise;
+    }
+
+    private async runPrerequisiteCheck(): Promise<PrerequisiteState> {
+        const cfg = this.getConfig();
+        const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+        const pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
+        await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+        return { pythonCommand, serverScriptPath };
     }
 
     private async resolveServerScriptPathWithInstaller(cfg: vscode.WorkspaceConfiguration): Promise<string> {
@@ -837,8 +871,6 @@ export class McpAccessClient {
         if (!fs.existsSync(serverScriptPath)) {
             throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
         }
-
-        await this.validateServerEnvironment(venvPython, serverScriptPath);
     }
 
     private async detectPythonBootstrapCommand(): Promise<PythonBootstrapCommand> {
@@ -847,25 +879,61 @@ export class McpAccessClient {
             { command: "python", args: [] }
         ];
 
+        const installedPython = this.findSystemPythonExecutable();
+        if (installedPython) {
+            candidates.push({ command: installedPython, args: [] });
+        }
+
         for (const candidate of candidates) {
             if (await this.commandAvailable(candidate.command, [...candidate.args, "--version"])) {
                 return candidate;
             }
         }
 
-        throw new Error(
-            "No se encontró un comando Python válido (py o python). Instala Python 3.9+ y vuelve a intentarlo."
-        );
+        const installed = await this.installPythonRuntime();
+        return { command: installed, args: [] };
     }
 
-    private async ensurePythonCommandAvailable(pythonCommand: string): Promise<void> {
+    private async ensurePythonRuntime(
+        cfg: vscode.WorkspaceConfiguration,
+        serverScriptPath: string
+    ): Promise<string> {
+        const pythonCommand = this.resolvePythonCommand(cfg, serverScriptPath);
+        return await this.ensurePythonCommandAvailable(pythonCommand);
+    }
+
+    private async ensurePythonCommandAvailable(pythonCommand: string): Promise<string> {
         const available = await this.commandAvailable(pythonCommand, ["--version"]);
         if (!available) {
             const action = await vscode.window.showWarningMessage(
-                `No se puede ejecutar Python con '${pythonCommand}'.`,
+                `No se puede ejecutar Python con '${pythonCommand}'. ¿Quieres instalar Python automáticamente?`,
+                "Instalar Python",
                 "Descargar Python",
                 "Abrir configuración"
             );
+
+            if (action === "Instalar Python") {
+                const installed = await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: "Instalando Python...",
+                        cancellable: false
+                    },
+                    async () => await this.installPythonRuntime()
+                );
+
+                await this.showEnvironmentHelp({
+                    title: "Python instalado",
+                    details: `Se detectó Python en '${installed}'.`,
+                    steps: [
+                        "Reintenta la conexión Access.",
+                        "Si el equipo aún usa una ruta antigua, actualiza accessExplorer.mcp.pythonCommand.",
+                        "La extensión continuará ahora con la instalación o validación de MCP-Access."
+                    ]
+                });
+
+                return installed;
+            }
 
             if (action === "Descargar Python") {
                 await vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/windows/"));
@@ -893,6 +961,46 @@ export class McpAccessClient {
                 `No se puede ejecutar Python con '${pythonCommand}'. Revisa accessExplorer.mcp.pythonCommand.`
             );
         }
+
+        return pythonCommand;
+    }
+
+    private async installPythonRuntime(): Promise<string> {
+        const wingetAvailable = await this.commandAvailable("winget", ["--version"]);
+        if (!wingetAvailable) {
+            await this.showEnvironmentHelp({
+                title: "No se puede instalar Python automáticamente",
+                details: "No se encontró winget en el sistema.",
+                steps: [
+                    "Instala Python manualmente desde python.org.",
+                    "Durante la instalación activa 'Add python.exe to PATH'.",
+                    "Reinicia VS Code al terminar."
+                ]
+            });
+            throw new Error("No se encontró winget para instalar Python automáticamente.");
+        }
+
+        await this.runCommand(
+            "winget",
+            [
+                "install",
+                "--id", "Python.Python.3.12",
+                "-e",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+                "--scope", "user"
+            ]
+        );
+
+        const installed = this.findSystemPythonExecutable();
+        if (!installed) {
+            throw new Error(
+                "Python parece haberse instalado, pero no se pudo localizar python.exe automáticamente."
+            );
+        }
+
+        await this.getConfig().update("mcp.pythonCommand", installed, vscode.ConfigurationTarget.Global);
+        return installed;
     }
 
     private async validateServerEnvironment(pythonCommand: string, serverScriptPath: string): Promise<void> {
@@ -1044,6 +1152,51 @@ export class McpAccessClient {
     private async commandAvailable(command: string, args: string[]): Promise<boolean> {
         const result = await this.runCommand(command, args, undefined, true);
         return result.exitCode === 0;
+    }
+
+    private findSystemPythonExecutable(): string | undefined {
+        const candidates: string[] = [];
+
+        const userProfile = process.env.USERPROFILE ?? "";
+        const localAppData = process.env.LOCALAPPDATA ?? "";
+        const programFiles = process.env.ProgramFiles ?? "";
+        const programFilesX86 = process.env["ProgramFiles(x86)"] ?? "";
+
+        if (userProfile) {
+            candidates.push(path.join(userProfile, "AppData", "Local", "Programs", "Python"));
+        }
+        if (localAppData) {
+            candidates.push(path.join(localAppData, "Programs", "Python"));
+        }
+        if (programFiles) {
+            candidates.push(programFiles);
+        }
+        if (programFilesX86) {
+            candidates.push(programFilesX86);
+        }
+
+        for (const baseDir of candidates) {
+            if (!baseDir || !fs.existsSync(baseDir)) {
+                continue;
+            }
+
+            try {
+                const entries = fs.readdirSync(baseDir, { withFileTypes: true })
+                    .filter((entry) => entry.isDirectory() && /^Python\d+/i.test(entry.name))
+                    .sort((left, right) => right.name.localeCompare(left.name));
+
+                for (const entry of entries) {
+                    const pythonExe = path.join(baseDir, entry.name, "python.exe");
+                    if (fs.existsSync(pythonExe)) {
+                        return pythonExe;
+                    }
+                }
+            } catch {
+                // ignore search errors and continue scanning known locations
+            }
+        }
+
+        return undefined;
     }
 
     private async runCommand(

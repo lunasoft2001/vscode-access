@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.9 - 2026-04-06
+
+- Added forced prerequisite validation when the extension activates.
+- Added automatic Python installation attempt via `winget` when Python is missing.
+- Made the extension continue with MCP-Access installation only after Python is available.
+- Improved first-run behavior so missing prerequisites are handled before the user hits a generic connection error.
+
 ## 1.0.8 - 2026-04-06
 
 - Fixed MCP-Access prerequisite setup to install the actual required Python packages: `mcp` and `pywin32`.
