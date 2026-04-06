@@ -10,7 +10,7 @@ import { offerAccessRestart, restartAccessProcesses } from "./utils/accessRecove
 export function activate(context: vscode.ExtensionContext): void {
     const configuration = () => vscode.workspace.getConfiguration("accessExplorer");
     const connectionStore = new ConnectionStore(context);
-    const mcpClient = new McpAccessClient(configuration);
+    const mcpClient = new McpAccessClient(configuration, context);
     const treeProvider = new AccessTreeProvider(connectionStore, mcpClient);
 
     context.subscriptions.push(mcpClient);

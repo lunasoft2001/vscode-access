@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.11 - 2026-04-06
+
+- Switched MCP-Access default runtime location to extension-managed storage (`globalStorage`).
+- Prioritized the managed runtime script before legacy user-level paths.
+- Kept backward compatibility with custom `accessExplorer.mcp.serverScriptPath` and legacy paths.
+
 ## 1.0.10 - 2026-04-06
 
 - Improved MCP-Access auto-installation for machines without Git.

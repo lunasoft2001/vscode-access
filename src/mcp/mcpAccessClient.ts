@@ -55,7 +55,10 @@ export class McpAccessClient {
     private prerequisiteCheckPromise: Promise<PrerequisiteState> | undefined;
     private prerequisiteState: PrerequisiteState | undefined;
 
-    constructor(private readonly getConfig: () => vscode.WorkspaceConfiguration) {
+    constructor(
+        private readonly getConfig: () => vscode.WorkspaceConfiguration,
+        private readonly extensionContext: vscode.ExtensionContext
+    ) {
         this.output = vscode.window.createOutputChannel("Access Explorer");
     }
 
@@ -756,8 +759,10 @@ export class McpAccessClient {
             throw new Error(`No existe access_mcp_server.py en: ${configuredPath}`);
         }
 
+        const managedBaseDir = this.getManagedRuntimeBaseDir();
         const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
         const candidates = [
+            path.join(managedBaseDir, "MCP-Access", "access_mcp_server.py"),
             path.join(userHome, "mcp-servers", "MCP-Access", "access_mcp_server.py"),
             path.join(userHome, "mcp-servers", "access_mcp_server.py")
         ];
@@ -779,12 +784,7 @@ export class McpAccessClient {
     }
 
     private async installMcpAccessDefault(): Promise<void> {
-        const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
-        if (!userHome) {
-            throw new Error("No se pudo determinar la carpeta del usuario para instalar MCP-Access.");
-        }
-
-        const baseDir = path.join(userHome, "mcp-servers");
+        const baseDir = this.getManagedRuntimeBaseDir();
         const repoDir = path.join(baseDir, "MCP-Access");
         const venvDir = path.join(baseDir, ".venv");
         const serverScriptPath = path.join(repoDir, "access_mcp_server.py");
@@ -1115,9 +1115,9 @@ export class McpAccessClient {
             "## Instalación manual rápida",
             "",
             "```powershell",
-            "py -3 -m venv %USERPROFILE%\\mcp-servers\\.venv",
-            "%USERPROFILE%\\mcp-servers\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
-            "%USERPROFILE%\\mcp-servers\\.venv\\Scripts\\python.exe -m pip install mcp pywin32",
+            `py -3 -m venv ${this.getManagedRuntimeBaseDir()}\\.venv`,
+            `${this.getManagedRuntimeBaseDir()}\\.venv\\Scripts\\python.exe -m pip install --upgrade pip`,
+            `${this.getManagedRuntimeBaseDir()}\\.venv\\Scripts\\python.exe -m pip install mcp pywin32`,
             "```"
         ].join("\n");
 
@@ -1130,12 +1130,9 @@ export class McpAccessClient {
     }
 
     private async showInstallFailureDiagnostics(details: string): Promise<void> {
-        const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
-        const baseDir = userHome ? path.join(userHome, "mcp-servers") : "(no disponible)";
-        const repoDir = userHome ? path.join(baseDir, "MCP-Access") : "(no disponible)";
-        const venvPython = userHome
-            ? path.join(baseDir, ".venv", "Scripts", "python.exe")
-            : "(no disponible)";
+        const baseDir = this.getManagedRuntimeBaseDir();
+        const repoDir = path.join(baseDir, "MCP-Access");
+        const venvPython = path.join(baseDir, ".venv", "Scripts", "python.exe");
 
         const content = [
             "# Error al instalar MCP-Access",
@@ -1232,6 +1229,10 @@ export class McpAccessClient {
         }
 
         return undefined;
+    }
+
+    private getManagedRuntimeBaseDir(): string {
+        return path.join(this.extensionContext.globalStorageUri.fsPath, "runtime", "mcp-access");
     }
 
     private async runCommand(
