@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { clearTimeout, setTimeout } from "node:timers";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawn } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
@@ -29,10 +30,22 @@ interface AccessRelationship {
     foreign_table?: string;
 }
 
+interface ShellResult {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+}
+
+interface PythonBootstrapCommand {
+    command: string;
+    args: string[];
+}
+
 export class McpAccessClient {
     private client: Client | undefined;
     private transport: StdioClientTransport | undefined;
     private readonly output: vscode.OutputChannel;
+    private installPromptShown = false;
 
     constructor(private readonly getConfig: () => vscode.WorkspaceConfiguration) {
         this.output = vscode.window.createOutputChannel("Access Explorer");
@@ -599,8 +612,9 @@ export class McpAccessClient {
         }
 
         const cfg = this.getConfig();
-        const serverScriptPath = this.resolveServerScriptPath(cfg);
+        const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
         const pythonCommand = this.resolvePythonCommand(cfg, serverScriptPath);
+        await this.ensurePythonCommandAvailable(pythonCommand);
 
         const transport = new StdioClientTransport({
             command: pythonCommand,
@@ -639,6 +653,69 @@ export class McpAccessClient {
         }
     }
 
+    private async resolveServerScriptPathWithInstaller(cfg: vscode.WorkspaceConfiguration): Promise<string> {
+        try {
+            return this.resolveServerScriptPath(cfg);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!this.isMissingServerScriptError(message)) {
+                throw error;
+            }
+
+            if (this.installPromptShown) {
+                throw error;
+            }
+            this.installPromptShown = true;
+
+            const action = await vscode.window.showWarningMessage(
+                "No se encontró MCP-Access (access_mcp_server.py). ¿Quieres instalarlo automáticamente?",
+                "Instalar automáticamente",
+                "Abrir configuración"
+            );
+
+            if (action === "Abrir configuración") {
+                await vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "accessExplorer.mcp.serverScriptPath"
+                );
+                throw new Error(
+                    "Configura accessExplorer.mcp.serverScriptPath con la ruta de access_mcp_server.py."
+                );
+            }
+
+            if (action !== "Instalar automáticamente") {
+                throw new Error("MCP-Access no está instalado o configurado.");
+            }
+
+            try {
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: "Instalando MCP-Access...",
+                        cancellable: false
+                    },
+                    async () => {
+                        await this.installMcpAccessDefault();
+                    }
+                );
+            } catch (installError) {
+                const details = installError instanceof Error ? installError.message : String(installError);
+                this.output.appendLine(`Error instalando MCP-Access: ${details}`);
+                this.output.show(true);
+
+                await this.showInstallFailureDiagnostics(details);
+
+                throw new Error(
+                    `No se pudo instalar MCP-Access automaticamente. ${details}`
+                );
+            }
+
+            const scriptPath = this.resolveServerScriptPath(cfg);
+            vscode.window.showInformationMessage("MCP-Access instalado correctamente.");
+            return scriptPath;
+        }
+    }
+
     private resolveServerScriptPath(cfg: vscode.WorkspaceConfiguration): string {
         const configuredPath = cfg.get<string>("mcp.serverScriptPath", "").trim();
         if (configuredPath) {
@@ -663,6 +740,199 @@ export class McpAccessClient {
         throw new Error(
             "Configura accessExplorer.mcp.serverScriptPath con la ruta absoluta de access_mcp_server.py."
         );
+    }
+
+    private isMissingServerScriptError(message: string): boolean {
+        return message.includes("No existe access_mcp_server.py")
+            || message.includes("Configura accessExplorer.mcp.serverScriptPath");
+    }
+
+    private async installMcpAccessDefault(): Promise<void> {
+        const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
+        if (!userHome) {
+            throw new Error("No se pudo determinar la carpeta del usuario para instalar MCP-Access.");
+        }
+
+        const baseDir = path.join(userHome, "mcp-servers");
+        const repoDir = path.join(baseDir, "MCP-Access");
+        const venvDir = path.join(baseDir, ".venv");
+        const serverScriptPath = path.join(repoDir, "access_mcp_server.py");
+
+        await fs.promises.mkdir(baseDir, { recursive: true });
+
+        const gitAvailable = await this.commandAvailable("git", ["--version"]);
+        if (!gitAvailable) {
+            throw new Error("No se encontró Git en PATH. Instálalo para poder descargar MCP-Access automáticamente.");
+        }
+
+        if (!fs.existsSync(repoDir)) {
+            await this.runCommand("git", ["clone", "https://github.com/unmateria/MCP-Access.git", repoDir]);
+        } else {
+            const pull = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
+            if (pull.exitCode !== 0) {
+                this.output.appendLine(`Aviso: no se pudo actualizar MCP-Access con git pull. ${pull.stderr}`);
+            }
+        }
+
+        const bootstrapPython = await this.detectPythonBootstrapCommand();
+        await this.runCommand(bootstrapPython.command, [...bootstrapPython.args, "-m", "venv", venvDir]);
+
+        const venvPython = path.join(venvDir, "Scripts", "python.exe");
+        if (!fs.existsSync(venvPython)) {
+            throw new Error(`No se encontró Python del entorno virtual en: ${venvPython}`);
+        }
+
+        await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
+        await this.runCommand(venvPython, ["-m", "pip", "install", "-e", repoDir]);
+
+        if (!fs.existsSync(serverScriptPath)) {
+            throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
+        }
+    }
+
+    private async detectPythonBootstrapCommand(): Promise<PythonBootstrapCommand> {
+        const candidates: PythonBootstrapCommand[] = [
+            { command: "py", args: ["-3"] },
+            { command: "python", args: [] }
+        ];
+
+        for (const candidate of candidates) {
+            if (await this.commandAvailable(candidate.command, [...candidate.args, "--version"])) {
+                return candidate;
+            }
+        }
+
+        throw new Error(
+            "No se encontró un comando Python válido (py o python). Instala Python 3.9+ y vuelve a intentarlo."
+        );
+    }
+
+    private async ensurePythonCommandAvailable(pythonCommand: string): Promise<void> {
+        const available = await this.commandAvailable(pythonCommand, ["--version"]);
+        if (!available) {
+            const action = await vscode.window.showWarningMessage(
+                `No se puede ejecutar Python con '${pythonCommand}'.`,
+                "Descargar Python",
+                "Abrir configuración"
+            );
+
+            if (action === "Descargar Python") {
+                await vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/windows/"));
+            }
+
+            if (action === "Abrir configuración") {
+                await vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "accessExplorer.mcp.pythonCommand"
+                );
+            }
+
+            throw new Error(
+                `No se puede ejecutar Python con '${pythonCommand}'. Revisa accessExplorer.mcp.pythonCommand.`
+            );
+        }
+    }
+
+    private async showInstallFailureDiagnostics(details: string): Promise<void> {
+        const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
+        const baseDir = userHome ? path.join(userHome, "mcp-servers") : "(no disponible)";
+        const repoDir = userHome ? path.join(baseDir, "MCP-Access") : "(no disponible)";
+        const venvPython = userHome
+            ? path.join(baseDir, ".venv", "Scripts", "python.exe")
+            : "(no disponible)";
+
+        const content = [
+            "# Error al instalar MCP-Access",
+            "",
+            "## Error técnico",
+            "",
+            "```text",
+            details,
+            "```",
+            "",
+            "## Comprobaciones sugeridas",
+            "",
+            "1. Verificar que Git esté instalado y en PATH (comando: git --version).",
+            "2. Verificar que Python 3.9+ esté instalado (comando: py -3 --version o python --version).",
+            "3. Comprobar permisos de escritura en la carpeta de instalación.",
+            "",
+            "## Rutas usadas por la instalación",
+            "",
+            `- Base: ${baseDir}`,
+            `- Repositorio MCP-Access: ${repoDir}`,
+            `- Python del entorno virtual: ${venvPython}`,
+            "",
+            "## Instalación manual alternativa",
+            "",
+            "```powershell",
+            "git clone https://github.com/unmateria/MCP-Access.git",
+            "cd MCP-Access",
+            "py -3 -m venv .venv",
+            ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
+            ".\\.venv\\Scripts\\python.exe -m pip install -e .",
+            "```",
+            "",
+            "Después, configura accessExplorer.mcp.serverScriptPath con la ruta de access_mcp_server.py si fuera necesario."
+        ].join("\n");
+
+        const doc = await vscode.workspace.openTextDocument({
+            content,
+            language: "markdown"
+        });
+
+        await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
+    }
+
+    private async commandAvailable(command: string, args: string[]): Promise<boolean> {
+        const result = await this.runCommand(command, args, undefined, true);
+        return result.exitCode === 0;
+    }
+
+    private async runCommand(
+        command: string,
+        args: string[],
+        cwd?: string,
+        allowFailure = false
+    ): Promise<ShellResult> {
+        return new Promise((resolve, reject) => {
+            const child = spawn(command, args, {
+                cwd,
+                windowsHide: true,
+                shell: false
+            });
+
+            let stdout = "";
+            let stderr = "";
+
+            child.stdout.on("data", (chunk: Buffer) => {
+                stdout += chunk.toString();
+            });
+
+            child.stderr.on("data", (chunk: Buffer) => {
+                stderr += chunk.toString();
+            });
+
+            child.on("error", (spawnError) => {
+                if (allowFailure) {
+                    resolve({ exitCode: -1, stdout, stderr: spawnError.message || stderr });
+                    return;
+                }
+                reject(spawnError);
+            });
+
+            child.on("close", (code) => {
+                const exitCode = code ?? -1;
+                const result: ShellResult = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+
+                if (!allowFailure && exitCode !== 0) {
+                    const details = result.stderr || result.stdout || `Código de salida ${exitCode}`;
+                    reject(new Error(`${command} ${args.join(" ")} falló: ${details}`));
+                    return;
+                }
+
+                resolve(result);
+            });
+        });
     }
 
     private resolvePythonCommand(

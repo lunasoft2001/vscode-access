@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
