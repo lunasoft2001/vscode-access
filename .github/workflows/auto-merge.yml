@@ -1,0 +1,30 @@
+name: Auto-merge on approved review
+
+# Triggered every time a pull-request review is submitted.
+# When the review state is "approved" AND the PR targets the master branch,
+# GitHub's native auto-merge is enabled so the PR is merged automatically
+# once every required status check turns green.
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge for approved PRs targeting master
+    runs-on: ubuntu-latest
+
+    # Only run when someone approves the PR and it targets the master branch.
+    if: >
+      github.event.review.state == 'approved' &&
+      github.event.pull_request.base.ref == 'master'
+
+    permissions:
+      pull-requests: write   # needed to enable auto-merge
+      contents: write        # needed to merge the pull request
+
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
