@@ -102,6 +102,19 @@ Nach der Installation in den VS Code **Einstellungen** konfigurieren (`Ctrl+,`):
 
 ---
 
+## Versionsverlauf
+
+Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
+Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
+
+- **v1.0.12**: Aktiviert den VBA-Zugriff im Access Trust Center (`AccessVBOM`) beim Setup automatisch (best effort).
+- **v1.0.11**: Verwendet standardmäßig einen von der Erweiterung verwalteten MCP-Runtime-Speicher (`globalStorage`).
+- **v1.0.10**: Fügt ZIP-Fallback für MCP-Access hinzu, wenn Git nicht verfügbar ist.
+
+Ab den nächsten Versionen wird dieser Abschnitt bei jedem Release aktualisiert (Fixes, Verbesserungen und neue Funktionen).
+
+---
+
 ## Danksagungen
 
 **Access Explorer** wurde entwickelt von [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).

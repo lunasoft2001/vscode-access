@@ -102,6 +102,20 @@ Una vez instalada, configura en **Ajustes** de VS Code (`Ctrl+,`):
 
 ---
 
+## Historial de versiones
+
+Este README incluye ahora un resumen corto de cambios por versión.
+Para el detalle completo, consulta [CHANGELOG.md](CHANGELOG.md).
+
+- **v1.0.13**: Instala automáticamente `Pillow` si falta PIL al capturar pantallas; flujo guiado de reparación cuando falta el módulo `mcp_access`.
+- **v1.0.12**: Activa automáticamente (best effort) el acceso VBA del Trust Center (`AccessVBOM`) durante el setup.
+- **v1.0.11**: Usa por defecto runtime MCP gestionado por la extensión (`globalStorage`).
+- **v1.0.10**: Añade fallback por ZIP de MCP-Access cuando Git no está disponible.
+
+A partir de las próximas versiones, esta sección se actualizará en cada release (fixes, mejoras y nuevas funcionalidades).
+
+---
+
 ## Créditos
 
 **Access Explorer** es una extensión desarrollada por [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).

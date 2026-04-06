@@ -682,10 +682,14 @@ export class McpAccessClient {
 
     private async runPrerequisiteCheck(): Promise<PrerequisiteState> {
         const cfg = this.getConfig();
-        const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
-        const pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
+        let serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+        let pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
         await this.tryEnableVbaTrustAutomatically();
-        await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+
+        const validated = await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+        pythonCommand = validated.pythonCommand;
+        serverScriptPath = validated.serverScriptPath;
+
         return { pythonCommand, serverScriptPath };
     }
 
@@ -862,7 +866,7 @@ export class McpAccessClient {
         }
 
         await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
-        await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32"]);
+        await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32", "Pillow"]);
 
         // Algunos forks de MCP-Access no son instalables con -e (sin setup.py/pyproject.toml).
         // En ese caso intentamos instalar dependencias desde requirements*.txt y continuamos.
@@ -1072,43 +1076,121 @@ export class McpAccessClient {
         return installed;
     }
 
-    private async validateServerEnvironment(pythonCommand: string, serverScriptPath: string): Promise<void> {
+    private async validateServerEnvironment(
+        pythonCommand: string,
+        serverScriptPath: string
+    ): Promise<PrerequisiteState> {
+        let currentPython = pythonCommand;
+        let currentScript = serverScriptPath;
+
+        let probeResult = await this.runServerImportProbe(currentPython, currentScript);
+        if (probeResult.exitCode === 0) {
+            return { pythonCommand: currentPython, serverScriptPath: currentScript };
+        }
+
+        const firstDetails = probeResult.stderr || probeResult.stdout || "Dependencias MCP-Access no disponibles.";
+        const firstMissingModule = this.extractMissingModule(firstDetails);
+
+        if (firstMissingModule && ["pil", "pillow"].includes(firstMissingModule.toLowerCase())) {
+            this.output.appendLine("Dependencia faltante detectada: PIL. Intentando instalar Pillow automáticamente...");
+            const pillowInstall = await this.runCommand(
+                currentPython,
+                ["-m", "pip", "install", "Pillow"],
+                undefined,
+                true
+            );
+
+            if (pillowInstall.exitCode === 0) {
+                this.output.appendLine("Pillow instalado correctamente.");
+                probeResult = await this.runServerImportProbe(currentPython, currentScript);
+                if (probeResult.exitCode === 0) {
+                    vscode.window.showInformationMessage("Se instaló Pillow automáticamente para las capturas de pantalla de formularios.");
+                    return { pythonCommand: currentPython, serverScriptPath: currentScript };
+                }
+            } else {
+                this.output.appendLine(`No se pudo instalar Pillow automáticamente: ${pillowInstall.stderr || pillowInstall.stdout}`);
+            }
+        }
+
+        const secondDetails = probeResult.stderr || probeResult.stdout || firstDetails;
+        const secondMissingModule = this.extractMissingModule(secondDetails);
+        if (secondMissingModule && secondMissingModule.toLowerCase().startsWith("mcp_access")) {
+            const action = await vscode.window.showWarningMessage(
+                "MCP-Access parece no estar instalado correctamente. ¿Quieres instalarlo/repararlo desde https://github.com/unmateria/MCP-Access?",
+                "Instalar/Reparar MCP-Access",
+                "Abrir repositorio"
+            );
+
+            if (action === "Abrir repositorio") {
+                await vscode.env.openExternal(vscode.Uri.parse("https://github.com/unmateria/MCP-Access"));
+            }
+
+            if (action === "Instalar/Reparar MCP-Access") {
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: "Instalando/Reparando MCP-Access...",
+                        cancellable: false
+                    },
+                    async () => {
+                        await this.installMcpAccessDefault();
+                    }
+                );
+
+                const cfg = this.getConfig();
+                currentScript = this.resolveServerScriptPath(cfg);
+                currentPython = await this.ensurePythonRuntime(cfg, currentScript);
+                probeResult = await this.runServerImportProbe(currentPython, currentScript);
+                if (probeResult.exitCode === 0) {
+                    vscode.window.showInformationMessage("MCP-Access instalado/reparado correctamente.");
+                    return { pythonCommand: currentPython, serverScriptPath: currentScript };
+                }
+            }
+        }
+
+        const details = probeResult.stderr || probeResult.stdout || secondDetails;
+        await this.showEnvironmentHelp({
+            title: "El entorno MCP-Access no está listo",
+            details,
+            steps: [
+                "Verifica primero que Python 3.9+ esté instalado y funcione con 'py -3 --version' o 'python --version'.",
+                "Instala las dependencias Python del servidor: 'pip install mcp pywin32 Pillow'.",
+                "Si falta MCP-Access, instala el repositorio en https://github.com/unmateria/MCP-Access.",
+                "Comprueba que Microsoft Access esté instalado en el equipo.",
+                "La extensión intenta activar automáticamente 'Trust access to the VBA project object model' (AccessVBOM). Si persiste, actívalo manualmente en Access Trust Center.",
+                `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${currentScript}.`
+            ]
+        });
+        throw new Error(
+            "El entorno de MCP-Access no está listo. "
+            + "Comprueba que estén instalados los paquetes Python 'mcp', 'pywin32' y 'Pillow'. "
+            + details
+        );
+    }
+
+    private async runServerImportProbe(pythonCommand: string, serverScriptPath: string): Promise<ShellResult> {
         const repoDir = path.dirname(serverScriptPath);
         const importProbe = [
             "import sys",
             `sys.path.insert(0, r'${escapePythonString(repoDir)}')`,
             "import mcp",
             "import win32com.client",
+            "from PIL import Image",
             "import mcp_access.server",
             "print('ok')"
         ].join("; ");
 
-        const result = await this.runCommand(
+        return await this.runCommand(
             pythonCommand,
             ["-c", importProbe],
             undefined,
             true
         );
+    }
 
-        if (result.exitCode !== 0) {
-            const details = result.stderr || result.stdout || "Dependencias MCP-Access no disponibles.";
-            await this.showEnvironmentHelp({
-                title: "El entorno MCP-Access no está listo",
-                details,
-                steps: [
-                    "Verifica primero que Python 3.9+ esté instalado y funcione con 'py -3 --version' o 'python --version'.",
-                    "Instala las dependencias Python del servidor: 'pip install mcp pywin32'.",
-                    "Comprueba que Microsoft Access esté instalado en el equipo.",
-                    "La extensión intenta activar automáticamente 'Trust access to the VBA project object model' (AccessVBOM). Si persiste, actívalo manualmente en Access Trust Center.",
-                    `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${serverScriptPath}.`
-                ]
-            });
-            throw new Error(
-                "El entorno de MCP-Access no está listo. "
-                + "Comprueba que estén instalados los paquetes Python 'mcp' y 'pywin32'. "
-                + details
-            );
-        }
+    private extractMissingModule(details: string): string | undefined {
+        const match = details.match(/No module named ['\"]([^'\"]+)['\"]/i);
+        return match?.[1];
     }
 
     private enrichConnectError(reason: string): string {
@@ -1151,7 +1233,7 @@ export class McpAccessClient {
             "```powershell",
             `py -3 -m venv ${this.getManagedRuntimeBaseDir()}\\.venv`,
             `${this.getManagedRuntimeBaseDir()}\\.venv\\Scripts\\python.exe -m pip install --upgrade pip`,
-            `${this.getManagedRuntimeBaseDir()}\\.venv\\Scripts\\python.exe -m pip install mcp pywin32`,
+            `${this.getManagedRuntimeBaseDir()}\\.venv\\Scripts\\python.exe -m pip install mcp pywin32 Pillow`,
             "```"
         ].join("\n");
 
@@ -1199,7 +1281,7 @@ export class McpAccessClient {
             "cd MCP-Access",
             "py -3 -m venv .venv",
             ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
-            ".\\.venv\\Scripts\\python.exe -m pip install mcp pywin32",
+            ".\\.venv\\Scripts\\python.exe -m pip install mcp pywin32 Pillow",
             ".\\.venv\\Scripts\\python.exe -m pip install -e .   # si existe setup.py/pyproject.toml",
             ".\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt   # alternativa",
             "```",

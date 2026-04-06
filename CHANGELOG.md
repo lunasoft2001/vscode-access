@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.13 - 2026-04-06
+
+- Added automatic detection and installation of `Pillow` when `from PIL import Image` fails during screenshot operations.
+- Added explicit warning and guided repair flow for MCP-Access when `mcp_access` module is missing.
+- Centralized import probe now validates `mcp`, `win32com.client`, `PIL` and `mcp_access.server` before starting the server.
+- Updated setup help messages to include `Pillow` in the required Python packages.
+
 ## 1.0.12 - 2026-04-06
 
 - Added automatic best-effort enabling of Access Trust Center VBA access (`AccessVBOM=1`) during prerequisite bootstrap.
