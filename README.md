@@ -102,3 +102,16 @@ MCP-Access is an independent project distributed under its own license. All righ
 
 Communication protocol: [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
+---
+
+## License
+
+© 2026 Juanjo Luna — [luna-soft](https://blog.luna-soft.es/)
+
+This extension is licensed under the **[Polyform Noncommercial License 1.0.0](LICENSE)**.
+
+**Free for personal, educational, and non-commercial use.**  
+**Commercial use** (including integration into commercial products, services, or use by a for-profit entity for business purposes) **requires a separate written commercial license** from the author.
+
+To inquire about commercial licensing, contact: [juanjo@luna-soft.es](mailto:juanjo@luna-soft.es)
+
