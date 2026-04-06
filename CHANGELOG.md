@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.12 - 2026-04-06
+
+- Added automatic best-effort enabling of Access Trust Center VBA access (`AccessVBOM=1`) during prerequisite bootstrap.
+- Improved environment guidance when VBA project access is still blocked by policy.
+
 ## 1.0.11 - 2026-04-06
 
 - Switched MCP-Access default runtime location to extension-managed storage (`globalStorage`).

@@ -54,6 +54,7 @@ export class McpAccessClient {
     private environmentHelpShown = false;
     private prerequisiteCheckPromise: Promise<PrerequisiteState> | undefined;
     private prerequisiteState: PrerequisiteState | undefined;
+    private trustBootstrapAttempted = false;
 
     constructor(
         private readonly getConfig: () => vscode.WorkspaceConfiguration,
@@ -683,8 +684,41 @@ export class McpAccessClient {
         const cfg = this.getConfig();
         const serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
         const pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
+        await this.tryEnableVbaTrustAutomatically();
         await this.validateServerEnvironment(pythonCommand, serverScriptPath);
         return { pythonCommand, serverScriptPath };
+    }
+
+    private async tryEnableVbaTrustAutomatically(): Promise<void> {
+        if (this.trustBootstrapAttempted) {
+            return;
+        }
+        this.trustBootstrapAttempted = true;
+
+        const script = [
+            "$versions = @('16.0','15.0','14.0','12.0','11.0')",
+            "foreach ($v in $versions) {",
+            "  $k = \"HKCU:\\Software\\Microsoft\\Office\\$v\\Access\\Security\"",
+            "  New-Item -Path $k -Force | Out-Null",
+            "  New-ItemProperty -Path $k -Name 'AccessVBOM' -Value 1 -PropertyType DWord -Force | Out-Null",
+            "}",
+            "Write-Output 'AccessVBOM enabled'"
+        ].join("; ");
+
+        const result = await this.runCommand(
+            "powershell",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            undefined,
+            true
+        );
+
+        if (result.exitCode === 0) {
+            this.output.appendLine("Trust Center VBA access habilitado automáticamente (AccessVBOM=1).");
+        } else {
+            this.output.appendLine(
+                `Aviso: no se pudo habilitar AccessVBOM automáticamente: ${result.stderr || result.stdout}`
+            );
+        }
     }
 
     private async resolveServerScriptPathWithInstaller(cfg: vscode.WorkspaceConfiguration): Promise<string> {
@@ -1065,7 +1099,7 @@ export class McpAccessClient {
                     "Verifica primero que Python 3.9+ esté instalado y funcione con 'py -3 --version' o 'python --version'.",
                     "Instala las dependencias Python del servidor: 'pip install mcp pywin32'.",
                     "Comprueba que Microsoft Access esté instalado en el equipo.",
-                    "En Access activa: Archivo > Opciones > Centro de confianza > Configuración del Centro de confianza > Configuración de macros > Trust access to the VBA project object model.",
+                    "La extensión intenta activar automáticamente 'Trust access to the VBA project object model' (AccessVBOM). Si persiste, actívalo manualmente en Access Trust Center.",
                     `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${serverScriptPath}.`
                 ]
             });
