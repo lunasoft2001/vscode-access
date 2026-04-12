@@ -31,7 +31,22 @@
 | Access VBA trust | Enable `Trust access to the VBA project object model` in Access Trust Center |
 | [MCP-Access](https://github.com/unmateria/MCP-Access) | External MCP server (Python process) launched automatically by the extension |
 
-### Install MCP-Access
+### MCP-Access — Automatic installation
+
+**The extension installs and configures MCP-Access automatically** the first time it connects to a database. It downloads the server, creates a Python virtual environment, and installs all required dependencies without any manual steps.
+
+> Python 3.9+ must be available on the system (or installable via `winget`) for the automatic setup to work.
+
+In Microsoft Access enable:
+
+```text
+File > Options > Trust Center > Trust Center Settings > Macro Settings > Trust access to the VBA project object model
+```
+
+> The extension also attempts to enable this setting automatically during setup.
+
+<details>
+<summary>Manual installation (only if automatic setup fails)</summary>
 
 Clone or download the server from [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
 
@@ -40,14 +55,12 @@ git clone https://github.com/unmateria/MCP-Access.git
 cd MCP-Access
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install mcp pywin32
+.\.venv\Scripts\python.exe -m pip install mcp pywin32 Pillow
 ```
 
-In Microsoft Access enable:
+Then set `accessExplorer.mcp.serverScriptPath` in VS Code Settings to the full path of `access_mcp_server.py`.
 
-```text
-File > Options > Trust Center > Trust Center Settings > Macro Settings > Trust access to the VBA project object model
-```
+</details>
 
 ---
 
@@ -79,12 +92,12 @@ Requires Node.js 18+ and `@vscode/vsce` (`npm install -g @vscode/vsce`).
 
 ## Configuration
 
-After installing the extension, configure it in VS Code **Settings** (`Ctrl+,`):
+After installing the extension, these settings are available in VS Code **Settings** (`Ctrl+,`). All settings are optional — the extension works out of the box with its automatic setup.
 
 | Setting | Description | Example |
 |---------|-------------|---------|
-| `accessExplorer.mcp.serverScriptPath` | Absolute path to `access_mcp_server.py` | `C:\\tools\\mcp-access\\access_mcp_server.py` |
-| `accessExplorer.mcp.pythonCommand` | Python command | `python` or `py` |
+| `accessExplorer.mcp.serverScriptPath` | Absolute path to `access_mcp_server.py` (leave empty to use the auto-managed runtime) | `C:\\tools\\mcp-access\\access_mcp_server.py` |
+| `accessExplorer.mcp.pythonCommand` | Python command (leave empty to use the auto-managed venv) | `python` or `py` |
 | `accessExplorer.mcp.toolPrefix` | Tool prefix used by the MCP server | `access` |
 | `accessExplorer.mcp.requestTimeoutMs` | Timeout for general MCP calls (ms) | `30000` |
 | `accessExplorer.mcp.sqlQueryTimeoutMs` | Timeout for SQL execution (ms) | `600000` |
