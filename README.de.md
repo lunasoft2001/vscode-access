@@ -31,7 +31,22 @@
 | VBA-Zugriff in Access | `Trust access to the VBA project object model` im Trust Center aktivieren |
 | [MCP-Access](https://github.com/unmateria/MCP-Access) | Externer MCP-Server (Python-Prozess), der automatisch von der Erweiterung gestartet wird |
 
-### MCP-Access installieren
+### MCP-Access — Automatische Installation
+
+**Die Erweiterung installiert und konfiguriert MCP-Access automatisch**, wenn zum ersten Mal eine Verbindung zu einer Datenbank hergestellt wird. Der Server wird heruntergeladen, eine Python-Virtualenv erstellt und alle erforderlichen Abhängigkeiten ohne manuelle Schritte installiert.
+
+> Python 3.9+ muss auf dem System verfügbar sein (oder über `winget` installierbar sein), damit die automatische Einrichtung funktioniert.
+
+In Microsoft Access aktivieren:
+
+```text
+Datei > Optionen > Trust Center > Einstellungen für das Trust Center > Makroeinstellungen > Trust access to the VBA project object model
+```
+
+> Die Erweiterung versucht, diese Einstellung auch automatisch während der Ersteinrichtung zu aktivieren.
+
+<details>
+<summary>Manuelle Installation (nur wenn die automatische Installation fehlschlägt)</summary>
 
 Server klonen oder herunterladen von [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
 
@@ -40,14 +55,12 @@ git clone https://github.com/unmateria/MCP-Access.git
 cd MCP-Access
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install mcp pywin32
+.\.venv\Scripts\python.exe -m pip install mcp pywin32 Pillow
 ```
 
-In Microsoft Access aktivieren:
+Anschließend `accessExplorer.mcp.serverScriptPath` in den VS Code-Einstellungen auf den vollständigen Pfad zu `access_mcp_server.py` setzen.
 
-```text
-Datei > Optionen > Trust Center > Einstellungen für das Trust Center > Makroeinstellungen > Trust access to the VBA project object model
-```
+</details>
 
 ---
 
@@ -79,12 +92,12 @@ Erfordert Node.js 18+ und `@vscode/vsce` (`npm install -g @vscode/vsce`).
 
 ## Konfiguration
 
-Nach der Installation in den VS Code **Einstellungen** konfigurieren (`Ctrl+,`):
+Nach der Installation sind folgende Einstellungen in den VS Code **Einstellungen** verfügbar (`Ctrl+,`). Alle Einstellungen sind optional — die Erweiterung funktioniert sofort mit der automatischen Einrichtung.
 
 | Einstellung | Beschreibung | Beispiel |
 |-------------|--------------|---------|
-| `accessExplorer.mcp.serverScriptPath` | Absoluter Pfad zu `access_mcp_server.py` | `C:\\tools\\mcp-access\\access_mcp_server.py` |
-| `accessExplorer.mcp.pythonCommand` | Python-Befehl | `python` oder `py` |
+| `accessExplorer.mcp.serverScriptPath` | Absoluter Pfad zu `access_mcp_server.py` (leer lassen für automatisch verwaltetes Runtime) | `C:\\tools\\mcp-access\\access_mcp_server.py` |
+| `accessExplorer.mcp.pythonCommand` | Python-Befehl (leer lassen für automatisch verwaltetes Venv) | `python` oder `py` |
 | `accessExplorer.mcp.toolPrefix` | Tool-Präfix des MCP-Servers | `access` |
 | `accessExplorer.mcp.requestTimeoutMs` | Timeout für allgemeine MCP-Aufrufe (ms) | `30000` |
 | `accessExplorer.mcp.sqlQueryTimeoutMs` | Timeout für SQL-Ausführung (ms) | `600000` |
