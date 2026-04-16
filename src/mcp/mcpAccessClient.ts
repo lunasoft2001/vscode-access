@@ -907,25 +907,33 @@ export class McpAccessClient {
             this.output.appendLine("MCP-Access ya existe localmente; Git no disponible para actualizar.");
         }
 
-        const bootstrapPython = await this.detectPythonBootstrapCommand();
-        await this.runCommand(bootstrapPython.command, [...bootstrapPython.args, "-m", "venv", venvDir]);
+        const uvAvailable = await this.commandAvailable("uv", ["--version"]);
+        if (uvAvailable) {
+            this.output.appendLine("uv detectado: usando uv para crear el entorno virtual.");
+            await this.runCommand("uv", ["venv", venvDir]);
+        } else {
+            const bootstrapPython = await this.detectPythonBootstrapCommand();
+            await this.runCommand(bootstrapPython.command, [...bootstrapPython.args, "-m", "venv", venvDir]);
+        }
 
         const venvPython = path.join(venvDir, "Scripts", "python.exe");
         if (!fs.existsSync(venvPython)) {
             throw new Error(`No se encontró Python del entorno virtual en: ${venvPython}`);
         }
 
-        await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
-        await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32", "Pillow"]);
+        if (uvAvailable) {
+            await this.runCommand("uv", ["pip", "install", "--python", venvPython, "--upgrade", "pip"]);
+            await this.runCommand("uv", ["pip", "install", "--python", venvPython, "mcp", "pywin32", "Pillow"]);
+        } else {
+            await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
+            await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32", "Pillow"]);
+        }
 
         // Algunos forks de MCP-Access no son instalables con -e (sin setup.py/pyproject.toml).
         // En ese caso intentamos instalar dependencias desde requirements*.txt y continuamos.
-        const editableInstall = await this.runCommand(
-            venvPython,
-            ["-m", "pip", "install", "-e", repoDir],
-            undefined,
-            true
-        );
+        const editableInstall = uvAvailable
+            ? await this.runCommand("uv", ["pip", "install", "--python", venvPython, "-e", repoDir], undefined, true)
+            : await this.runCommand(venvPython, ["-m", "pip", "install", "-e", repoDir], undefined, true);
 
         if (editableInstall.exitCode !== 0) {
             this.output.appendLine(
@@ -945,12 +953,9 @@ export class McpAccessClient {
                     continue;
                 }
 
-                const reqInstall = await this.runCommand(
-                    venvPython,
-                    ["-m", "pip", "install", "-r", reqFile],
-                    undefined,
-                    true
-                );
+                const reqInstall = uvAvailable
+                    ? await this.runCommand("uv", ["pip", "install", "--python", venvPython, "-r", reqFile], undefined, true)
+                    : await this.runCommand(venvPython, ["-m", "pip", "install", "-r", reqFile], undefined, true);
 
                 if (reqInstall.exitCode === 0) {
                     requirementsInstalled = true;
@@ -1011,6 +1016,13 @@ export class McpAccessClient {
             if (await this.commandAvailable(candidate.command, [...candidate.args, "--version"])) {
                 return candidate;
             }
+        }
+
+        // uv puede proveer Python incluso sin instalación del sistema
+        if (await this.commandAvailable("uv", ["--version"])) {
+            this.output.appendLine("Python no encontrado en el sistema; se usará uv para instalar Python automáticamente.");
+            await this.runCommand("uv", ["python", "install"]);
+            return { command: "uv", args: ["run", "python"] };
         }
 
         const installed = await this.installPythonRuntime();
