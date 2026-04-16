@@ -1,0 +1,82 @@
+name: Publish Extension to Marketplace
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile extension
+        run: npm run compile
+
+      - name: Detect version change
+        id: version
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const cp = require('child_process');
+
+          const before = process.env.GITHUB_EVENT_BEFORE || '';
+          const nowVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+
+          let oldVersion = '';
+          try {
+            if (before) {
+              const oldPkg = cp.execSync(`git show ${before}:package.json`, { encoding: 'utf8' });
+              oldVersion = JSON.parse(oldPkg).version || '';
+            }
+          } catch {
+            oldVersion = '';
+          }
+
+          const changed = oldVersion !== nowVersion;
+          const out = process.env.GITHUB_OUTPUT;
+
+          fs.appendFileSync(out, `old_version=${oldVersion}\n`);
+          fs.appendFileSync(out, `new_version=${nowVersion}\n`);
+          fs.appendFileSync(out, `version_changed=${String(changed)}\n`);
+
+          console.log(`Old version: ${oldVersion || '(none)'}`);
+          console.log(`New version: ${nowVersion}`);
+          console.log(`Version changed: ${changed}`);
+          EOF
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Publish to VS Marketplace
+        if: github.event_name == 'workflow_dispatch' || steps.version.outputs.version_changed == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish -p "$VSCE_PAT"
+
+      - name: Skip publish info
+        if: github.event_name != 'workflow_dispatch' && steps.version.outputs.version_changed != 'true'
+        run: |
+          echo "No se publica: package.json no cambió de versión."
+          echo "Version anterior: ${{ steps.version.outputs.old_version }}"
+          echo "Version actual:  ${{ steps.version.outputs.new_version }}"
