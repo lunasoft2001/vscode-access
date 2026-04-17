@@ -252,6 +252,16 @@
                     "default": 600000,
                     "minimum": 5000,
                     "description": "%config.sqlQueryTimeoutMs.description%"
+                },
+                "accessExplorer.mcp.autoEnableVbaTrust": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%config.autoEnableVbaTrust.description%"
+                },
+                "accessExplorer.mcp.preserveTrustedLocations": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%config.preserveTrustedLocations.description%"
                 }
             }
         }

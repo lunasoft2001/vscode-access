@@ -63,6 +63,7 @@ export class McpAccessClient {
     private prerequisiteCheckPromise: Promise<PrerequisiteState> | undefined;
     private prerequisiteState: PrerequisiteState | undefined;
     private trustBootstrapAttempted = false;
+    private trustedLocationsSnapshotJson: string | undefined;
 
     constructor(
         private readonly getConfig: () => vscode.WorkspaceConfiguration,
@@ -72,6 +73,7 @@ export class McpAccessClient {
     }
 
     dispose(): void {
+        void this.disconnect();
         this.output.dispose();
     }
 
@@ -136,6 +138,11 @@ export class McpAccessClient {
         }
         this.client = undefined;
         this.transport = undefined;
+
+        const preserveTrustedLocations = this.getConfig().get<boolean>("mcp.preserveTrustedLocations", true);
+        if (preserveTrustedLocations) {
+            await this.tryRestoreTrustedLocationsSnapshot("disconnect");
+        }
     }
 
     async listObjects(connection: AccessConnection, objectType: string): Promise<AccessObjectInfo[]> {
@@ -677,7 +684,14 @@ export class McpAccessClient {
             return;
         }
 
+        const cfg = this.getConfig();
+        const preserveTrustedLocations = cfg.get<boolean>("mcp.preserveTrustedLocations", true);
+
         try {
+            if (preserveTrustedLocations) {
+                await this.captureTrustedLocationsSnapshot();
+            }
+
             const { pythonCommand, serverScriptPath } = await this.getOrCreatePrerequisiteCheck();
 
             const transport = new StdioClientTransport({
@@ -703,12 +717,118 @@ export class McpAccessClient {
             this.transport = transport;
             this.client = client;
         } catch (error) {
+            if (preserveTrustedLocations) {
+                await this.tryRestoreTrustedLocationsSnapshot("connect-error");
+            }
+
             const rawReason = error instanceof Error ? error.message : String(error);
             const reason = this.enrichConnectError(rawReason);
             throw new Error(
                 `No se pudo conectar con MCP-Access. ${reason}`
             );
         }
+    }
+
+    private async captureTrustedLocationsSnapshot(): Promise<void> {
+        if (this.trustedLocationsSnapshotJson) {
+            return;
+        }
+
+        const script = [
+            "$roots = @( 'HKCU:\\Software\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations', 'HKCU:\\Software\\WOW6432Node\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations' )",
+            "$snapshot = @()",
+            "foreach ($root in $roots) {",
+            "  $entry = [ordered]@{ Root = $root; Exists = (Test-Path -LiteralPath $root); RootProperties = [ordered]@{}; Locations = @() }",
+            "  if ($entry.Exists) {",
+            "    $rootProps = Get-ItemProperty -LiteralPath $root",
+            "    foreach ($p in $rootProps.PSObject.Properties) { if ($p.Name -notlike 'PS*') { $entry.RootProperties[$p.Name] = $p.Value } }",
+            "    foreach ($child in (Get-ChildItem -LiteralPath $root)) {",
+            "      $loc = [ordered]@{ Key = $child.PSChildName }",
+            "      $props = Get-ItemProperty -LiteralPath $child.PSPath",
+            "      foreach ($p in $props.PSObject.Properties) { if ($p.Name -notlike 'PS*') { $loc[$p.Name] = $p.Value } }",
+            "      $entry.Locations += [pscustomobject]$loc",
+            "    }",
+            "  }",
+            "  $snapshot += [pscustomobject]$entry",
+            "}",
+            "$snapshot | ConvertTo-Json -Depth 12 -Compress"
+        ].join("; ");
+
+        const result = await this.runCommand(
+            "powershell",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            undefined,
+            true
+        );
+
+        if (result.exitCode !== 0 || !result.stdout) {
+            this.output.appendLine(
+                `Aviso: no se pudo crear snapshot de Trusted Locations: ${result.stderr || result.stdout}`
+            );
+            return;
+        }
+
+        this.trustedLocationsSnapshotJson = result.stdout;
+        this.output.appendLine("Snapshot de Trusted Locations capturado.");
+    }
+
+    private async tryRestoreTrustedLocationsSnapshot(reason: string): Promise<void> {
+        if (!this.trustedLocationsSnapshotJson) {
+            return;
+        }
+
+        const escapedSnapshot = escapePowerShellString(this.trustedLocationsSnapshotJson);
+        const script = [
+            `$json = '${escapedSnapshot}'`,
+            "$snapshot = ConvertFrom-Json -InputObject $json -Depth 12",
+            "if ($snapshot -isnot [System.Array]) { $snapshot = @($snapshot) }",
+            "foreach ($entry in $snapshot) {",
+            "  $root = [string]$entry.Root",
+            "  if ([string]::IsNullOrWhiteSpace($root)) { continue }",
+            "  if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }",
+            "  if ($entry.Exists -eq $true) {",
+            "    New-Item -Path $root -Force | Out-Null",
+            "    if ($entry.RootProperties) {",
+            "      foreach ($p in $entry.RootProperties.PSObject.Properties) {",
+            "        if ($null -eq $p.Value) { continue }",
+            "        $type = 'String'",
+            "        if ($p.Value -is [bool] -or $p.Value -is [int] -or $p.Value -is [long]) { $type = 'DWord' }",
+            "        New-ItemProperty -Path $root -Name $p.Name -Value $p.Value -PropertyType $type -Force | Out-Null",
+            "      }",
+            "    }",
+            "    foreach ($loc in $entry.Locations) {",
+            "      $key = [string]$loc.Key",
+            "      if ([string]::IsNullOrWhiteSpace($key)) { continue }",
+            "      $locPath = Join-Path $root $key",
+            "      New-Item -Path $locPath -Force | Out-Null",
+            "      foreach ($p in $loc.PSObject.Properties) {",
+            "        if ($p.Name -eq 'Key' -or $null -eq $p.Value) { continue }",
+            "        $type = 'String'",
+            "        if ($p.Value -is [bool] -or $p.Value -is [int] -or $p.Value -is [long]) { $type = 'DWord' }",
+            "        New-ItemProperty -Path $locPath -Name $p.Name -Value $p.Value -PropertyType $type -Force | Out-Null",
+            "      }",
+            "    }",
+            "  }",
+            "}",
+            "Write-Output 'Trusted Locations restored'"
+        ].join("; ");
+
+        const result = await this.runCommand(
+            "powershell",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            undefined,
+            true
+        );
+
+        if (result.exitCode !== 0) {
+            this.output.appendLine(
+                `Aviso: no se pudieron restaurar Trusted Locations (${reason}): ${result.stderr || result.stdout}`
+            );
+            return;
+        }
+
+        this.output.appendLine(`Trusted Locations restauradas (${reason}).`);
+        this.trustedLocationsSnapshotJson = undefined;
     }
 
     private getOrCreatePrerequisiteCheck(): Promise<PrerequisiteState> {
@@ -734,7 +854,10 @@ export class McpAccessClient {
         const cfg = this.getConfig();
         let serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
         let pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
-        await this.tryEnableVbaTrustAutomatically();
+        const autoEnableVbaTrust = cfg.get<boolean>("mcp.autoEnableVbaTrust", false);
+        if (autoEnableVbaTrust) {
+            await this.tryEnableVbaTrustAutomatically();
+        }
 
         const validated = await this.validateServerEnvironment(pythonCommand, serverScriptPath);
         pythonCommand = validated.pythonCommand;
@@ -1219,7 +1342,7 @@ export class McpAccessClient {
                 "Instala las dependencias Python del servidor: 'pip install mcp pywin32 Pillow'.",
                 "Si falta MCP-Access, instala el repositorio en https://github.com/unmateria/MCP-Access.",
                 "Comprueba que Microsoft Access esté instalado en el equipo.",
-                "La extensión intenta activar automáticamente 'Trust access to the VBA project object model' (AccessVBOM). Si persiste, actívalo manualmente en Access Trust Center.",
+                "Activa manualmente 'Trust access to the VBA project object model' (AccessVBOM) en Access Trust Center o habilita accessExplorer.mcp.autoEnableVbaTrust.",
                 `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${currentScript}.`
             ]
         });
