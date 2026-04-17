@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.0.16",
+    "version": "1.0.17",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
@@ -252,6 +252,16 @@
                     "default": 600000,
                     "minimum": 5000,
                     "description": "%config.sqlQueryTimeoutMs.description%"
+                },
+                "accessExplorer.mcp.autoEnableVbaTrust": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%config.autoEnableVbaTrust.description%"
+                },
+                "accessExplorer.mcp.preserveTrustedLocations": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%config.preserveTrustedLocations.description%"
                 }
             }
         }

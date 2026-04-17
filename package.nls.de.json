@@ -23,5 +23,7 @@
     "config.serverScriptPath.description": "Absoluter Pfad zu access_mcp_server.py von MCP-Access.",
     "config.toolPrefix.description": "Tool-Präfix des MCP-Servers (z. B. access oder mcp_access_access).",
     "config.requestTimeoutMs.description": "Timeout in Millisekunden für allgemeine MCP-Aufrufe.",
-    "config.sqlQueryTimeoutMs.description": "Timeout in Millisekunden für SQL-Abfragen (execute_sql). Standard: 600000 (10 Min.)."
+    "config.sqlQueryTimeoutMs.description": "Timeout in Millisekunden für SQL-Abfragen (execute_sql). Standard: 600000 (10 Min.).",
+    "config.autoEnableVbaTrust.description": "Setzt beim Start automatisch AccessVBOM=1 im Access Trust Center per Registrierung. Deaktiviert lassen, wenn die Erweiterung keine Trust-Center-Einstellungen ändern soll.",
+    "config.preserveTrustedLocations.description": "Erstellt vor der MCP-Sitzung einen Snapshot der Trusted Locations und stellt ihn beim Trennen automatisch wieder her."
 }
