@@ -709,7 +709,7 @@ export class McpAccessClient {
         try {
             await this.callTool("eval_vba", {
                 db_path: connection.dbPath,
-                code: "Application.DisplayAlerts = False\nDoCmd.SetWarnings False"
+                expression: "Application.DisplayAlerts = False\nDoCmd.SetWarnings False"
             }, 5000);
         } catch {
             // Non-fatal: Access may not be running interactively
@@ -720,7 +720,7 @@ export class McpAccessClient {
         try {
             await this.callTool("eval_vba", {
                 db_path: connection.dbPath,
-                code: "Application.DisplayAlerts = True\nDoCmd.SetWarnings True"
+                expression: "Application.DisplayAlerts = True\nDoCmd.SetWarnings True"
             }, 5000);
         } catch {
             // Non-fatal
@@ -777,28 +777,82 @@ export class McpAccessClient {
      */
     async evalVba(
         connection: AccessConnection,
-        code: string,
+        expression: string,
         timeoutOverrideMs?: number
     ): Promise<void> {
         await this.callTool("eval_vba", {
             db_path: connection.dbPath,
-            code
+            expression
+        }, timeoutOverrideMs);
+    }
+
+    async runVba(
+        connection: AccessConnection,
+        procedure: string,
+        args: unknown[] = [],
+        timeoutOverrideMs?: number
+    ): Promise<void> {
+        const timeoutSeconds =
+            typeof timeoutOverrideMs === "number"
+                ? Math.max(1, Math.ceil(timeoutOverrideMs / 1000))
+                : undefined;
+
+        const payload: Record<string, unknown> = {
+            db_path: connection.dbPath,
+            procedure,
+            args
+        };
+
+        if (typeof timeoutSeconds === "number") {
+            payload.timeout = timeoutSeconds;
+        }
+
+        await this.callTool("run_vba", payload, timeoutOverrideMs);
+    }
+
+    /**
+     * Compila un módulo VBA específico via DoCmd.Save(acModule, name).
+     *
+     * LoadFromText (set_code) invalidates the compiled p-code for the entire
+     * VBA project.  Application.Run needs p-code to execute a procedure.
+     * DoCmd.Save compiles ONLY the named module, independently of any errors
+     * in other modules in the database.
+     *
+     * vbe_replace_lines always calls DoCmd.Save after any operation, so a
+     * no-op replace (start_line=1, count=0, new_code="") triggers the
+     * compile+save without modifying any source lines.
+     */
+    async compileModule(
+        connection: AccessConnection,
+        moduleName: string,
+        timeoutOverrideMs?: number
+    ): Promise<void> {
+        await this.callTool("vbe_replace_lines", {
+            db_path: connection.dbPath,
+            object_type: "module",
+            object_name: moduleName,
+            start_line: 1,
+            count: 0,
+            new_code: ""
         }, timeoutOverrideMs);
     }
 
     /**
      * Elimina un módulo VBA del proyecto activo.
-     * Usado por BulkExportService para limpiar módulos temporales.
+     * Usa DoCmd.DeleteObject (COM directo) en lugar de eval_vba/VBE, por lo que
+     * funciona incluso cuando el proyecto VBA tiene errores de compilación.
      */
     async deleteVbaModule(
         connection: AccessConnection,
-        moduleName: string
+        moduleName: string,
+        timeoutOverrideMs?: number
     ): Promise<void> {
-        await this.evalVba(
-            connection,
-            `Application.VBE.ActiveVBProject.VBComponents.Remove Application.VBE.ActiveVBProject.VBComponents("${moduleName}")`,
-            15000
-        );
+        await this.callTool("delete_object", {
+            db_path: connection.dbPath,
+            object_type: "module",
+            object_name: moduleName,
+            confirm: true
+        }, timeoutOverrideMs ?? 15000);
     }
 
     private async connect(): Promise<void> {

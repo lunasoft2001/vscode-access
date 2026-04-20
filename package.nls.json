@@ -10,6 +10,7 @@
     "command.reconnect.title": "Access: Reconnect MCP",
     "command.restartProcesses.title": "Access: Restart Access Processes",
     "command.showMcpRuntime.title": "Access: Show MCP Runtime",
+    "command.registerMcpServer.title": "Access: Register MCP Server in VS Code",
     "command.searchObjects.title": "Access: Search Objects",
     "command.showDetails.title": "Access: Show Object Details",
     "command.runSqlQuery.title": "Access: Run SQL Query",

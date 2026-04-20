@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.19 - 2026-04-20
+
+- Added automatic registration of the MCP-Access server in VS Code's user-level `mcp.json` on startup, so Copilot and other MCP-aware tools discover it without manual configuration.
+- Added new command `Access: Register MCP Server in VS Code` to force registration and reload the window.
+- The extension now resolves the correct Python executable (venv) when writing the `mcp.json` entry, preventing `ModuleNotFoundError: No module named 'mcp'` at server startup.
+- Rewrote `BulkExportService` to use a separate clean runner database (`SecondBrainRunner.accdb`) instead of injecting VBA into the target database, avoiding `Application.Run` failures caused by pre-existing compile errors in the target project.
+- VBA entry points now accept `targetDbPath` as first argument and call `Application.OpenCurrentDatabase` to switch context before exporting.
+
 ## 1.0.18 - 2026-04-20
 
 - Hardened MCP-Access setup on Windows by preinstalling `cryptography` with `--only-binary :all:` to avoid source builds that require Rust/MSVC toolchains.

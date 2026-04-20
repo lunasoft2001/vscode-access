@@ -63,8 +63,8 @@ export class SecondBrainService {
 
     private readonly bulkExportService: BulkExportService;
 
-    constructor(private readonly mcpClient: McpAccessClient) {
-        this.bulkExportService = new BulkExportService(mcpClient);
+    constructor(private readonly mcpClient: McpAccessClient, globalStoragePath: string) {
+        this.bulkExportService = new BulkExportService(mcpClient, globalStoragePath);
     }
 
     async exportSecondBrain(

@@ -19,8 +19,14 @@ Option Explicit
 ' ───────────────────────────────────────────────────────────────────────────
 ' PUNTO DE ENTRADA 1 — JSON para SecondBrain
 ' ───────────────────────────────────────────────────────────────────────────
-Public Sub ExportToJsonFile(ByVal outputPath As String, Optional ByVal mode As String = "full")
+Public Sub ExportToJsonFile(ByVal targetDbPath As String, ByVal outputPath As String, Optional ByVal mode As String = "full")
     On Error GoTo ErrH
+
+    ' Open the target database as the current database so that CurrentDb(),
+    ' CurrentProject, VBE.ActiveVBProject, DoCmd etc. all operate on it.
+    ' This module lives in a separate clean runner .accdb — it is not
+    ' injected into the target database at all.
+    Application.OpenCurrentDatabase targetDbPath
 
     Dim json As String
     json = BuildJsonExport(mode)
@@ -34,8 +40,10 @@ End Sub
 ' ───────────────────────────────────────────────────────────────────────────
 ' PUNTO DE ENTRADA 2 — Carpetas estilo access-analyzer
 ' ───────────────────────────────────────────────────────────────────────────
-Public Sub ExportToFiles(ByVal outputPath As String, Optional ByVal mode As String = "full")
+Public Sub ExportToFiles(ByVal targetDbPath As String, ByVal outputPath As String, Optional ByVal mode As String = "full")
     On Error GoTo ErrH
+
+    Application.OpenCurrentDatabase targetDbPath
 
     CreateExportFolders outputPath
     If mode = "full" Or mode = "tables"   Then ExportTablesFiles outputPath

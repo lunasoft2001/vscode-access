@@ -1,8 +1,4 @@
-// AUTO-GENERATED — do not edit directly.
-// Source: src/vba/SecondBrainBulkExport.bas
-// Re-generate with: Get-Content ... | set-content bulkExportVba.ts
-
-export const BULK_EXPORT_VBA = `Attribute VB_Name = "SecondBrainBulkExport"
+﻿export const BULK_EXPORT_VBA = `Attribute VB_Name = "SecondBrainBulkExport"
 Option Compare Database
 Option Explicit
 
@@ -23,8 +19,14 @@ Option Explicit
 ' ───────────────────────────────────────────────────────────────────────────
 ' PUNTO DE ENTRADA 1 — JSON para SecondBrain
 ' ───────────────────────────────────────────────────────────────────────────
-Public Sub ExportToJsonFile(ByVal outputPath As String, Optional ByVal mode As String = "full")
+Public Sub ExportToJsonFile(ByVal targetDbPath As String, ByVal outputPath As String, Optional ByVal mode As String = "full")
     On Error GoTo ErrH
+
+    ' Open the target database as the current database so that CurrentDb(),
+    ' CurrentProject, VBE.ActiveVBProject, DoCmd etc. all operate on it.
+    ' This module lives in a separate clean runner .accdb — it is not
+    ' injected into the target database at all.
+    Application.OpenCurrentDatabase targetDbPath
 
     Dim json As String
     json = BuildJsonExport(mode)
@@ -38,8 +40,10 @@ End Sub
 ' ───────────────────────────────────────────────────────────────────────────
 ' PUNTO DE ENTRADA 2 — Carpetas estilo access-analyzer
 ' ───────────────────────────────────────────────────────────────────────────
-Public Sub ExportToFiles(ByVal outputPath As String, Optional ByVal mode As String = "full")
+Public Sub ExportToFiles(ByVal targetDbPath As String, ByVal outputPath As String, Optional ByVal mode As String = "full")
     On Error GoTo ErrH
+
+    Application.OpenCurrentDatabase targetDbPath
 
     CreateExportFolders outputPath
     If mode = "full" Or mode = "tables"   Then ExportTablesFiles outputPath
@@ -570,12 +574,12 @@ End Function
 Private Sub CreateExportFolders(ByVal basePath As String)
     On Error Resume Next
     MkDir basePath
-    MkDir basePath & "\\01_Tablas"
-    MkDir basePath & "\\02_Consultas"
-    MkDir basePath & "\\03_Formularios"
-    MkDir basePath & "\\04_Informes"
-    MkDir basePath & "\\05_Macros"
-    MkDir basePath & "\\06_Codigo_VBA"
+    MkDir basePath & "\\\\01_Tablas"
+    MkDir basePath & "\\\\02_Consultas"
+    MkDir basePath & "\\\\03_Formularios"
+    MkDir basePath & "\\\\04_Informes"
+    MkDir basePath & "\\\\05_Macros"
+    MkDir basePath & "\\\\06_Codigo_VBA"
     On Error GoTo 0
 End Sub
 
@@ -591,7 +595,7 @@ Private Sub ExportSummaryFile(ByVal basePath As String)
     content = content & "Formularios: " & CurrentProject.AllForms.Count & vbCrLf
     content = content & "Informes: " & CurrentProject.AllReports.Count & vbCrLf
     content = content & "Macros: " & CurrentProject.AllMacros.Count & vbCrLf
-    WriteUTF8File basePath & "\\00_RESUMEN.txt", content
+    WriteUTF8File basePath & "\\\\00_RESUMEN.txt", content
 End Sub
 
 Private Sub ExportTablesFiles(ByVal basePath As String)
@@ -605,7 +609,7 @@ Private Sub ExportTablesFiles(ByVal basePath As String)
             For Each fld In tbl.Fields
                 content = content & fld.Name & " | " & GetFieldType(fld) & " | " & IIf(fld.Required, "Requerido", "Opcional") & vbCrLf
             Next fld
-            WriteUTF8File basePath & "\\01_Tablas\\" & CleanName(tbl.Name) & ".txt", content
+            WriteUTF8File basePath & "\\\\01_Tablas\\\\" & CleanName(tbl.Name) & ".txt", content
         End If
     Next tbl
 End Sub
@@ -619,7 +623,7 @@ Private Sub ExportQueriesFiles(ByVal basePath As String)
             On Error Resume Next: sql = qry.SQL: On Error GoTo 0
             Dim content As String
             content = "-- Consulta: " & qry.Name & vbCrLf & sql
-            WriteUTF8File basePath & "\\02_Consultas\\" & CleanName(qry.Name) & ".sql", content
+            WriteUTF8File basePath & "\\\\02_Consultas\\\\" & CleanName(qry.Name) & ".sql", content
         End If
     Next qry
 End Sub
@@ -629,9 +633,9 @@ Private Sub ExportFormsFiles(ByVal basePath As String)
     For i = 0 To CurrentProject.AllForms.Count - 1
         Dim fName As String: fName = CurrentProject.AllForms(i).Name
         On Error Resume Next
-        Application.SaveAsText acForm, fName, basePath & "\\03_Formularios\\" & CleanName(fName) & ".formulario.txt"
+        Application.SaveAsText acForm, fName, basePath & "\\\\03_Formularios\\\\" & CleanName(fName) & ".formulario.txt"
         On Error GoTo 0
-        ExportUiVbaCode basePath & "\\03_Formularios", "Form_" & fName, fName & "_codigo"
+        ExportUiVbaCode basePath & "\\\\03_Formularios", "Form_" & fName, fName & "_codigo"
     Next i
 End Sub
 
@@ -640,9 +644,9 @@ Private Sub ExportReportsFiles(ByVal basePath As String)
     For i = 0 To CurrentProject.AllReports.Count - 1
         Dim rName As String: rName = CurrentProject.AllReports(i).Name
         On Error Resume Next
-        Application.SaveAsText acReport, rName, basePath & "\\04_Informes\\" & CleanName(rName) & ".informe.txt"
+        Application.SaveAsText acReport, rName, basePath & "\\\\04_Informes\\\\" & CleanName(rName) & ".informe.txt"
         On Error GoTo 0
-        ExportUiVbaCode basePath & "\\04_Informes", "Report_" & rName, rName & "_codigo"
+        ExportUiVbaCode basePath & "\\\\04_Informes", "Report_" & rName, rName & "_codigo"
     Next i
 End Sub
 
@@ -651,7 +655,7 @@ Private Sub ExportMacrosFiles(ByVal basePath As String)
     For i = 0 To CurrentProject.AllMacros.Count - 1
         Dim mName As String: mName = CurrentProject.AllMacros(i).Name
         On Error Resume Next
-        Application.SaveAsText acMacro, mName, basePath & "\\05_Macros\\" & CleanName(mName) & ".macro.txt"
+        Application.SaveAsText acMacro, mName, basePath & "\\\\05_Macros\\\\" & CleanName(mName) & ".macro.txt"
         On Error GoTo 0
     Next i
 End Sub
@@ -666,7 +670,7 @@ Private Sub ExportModulesFiles(ByVal basePath As String)
         Dim vbComp As Object
         Set vbComp = vbProj.VBComponents(k)
         If vbComp.Type = 1 Or vbComp.Type = 2 Then
-            ExportVbaComponent basePath & "\\06_Codigo_VBA", vbComp
+            ExportVbaComponent basePath & "\\\\06_Codigo_VBA", vbComp
         End If
     Next k
     On Error GoTo 0
@@ -693,7 +697,7 @@ Private Sub ExportVbaComponent(ByVal folder As String, ByVal vbComp As Object, O
     For i = 1 To vbComp.CodeModule.CountOfLines
         content = content & vbComp.CodeModule.Lines(i, 1) & vbCrLf
     Next i
-    WriteUTF8File folder & "\\" & fileName & ".bas", content
+    WriteUTF8File folder & "\\\\" & fileName & ".bas", content
 End Sub
 
 ' ───────────────────────────────────────────────────────────────────────────
@@ -762,7 +766,7 @@ End Function
 
 Private Function CleanName(ByVal nameIn As String) As String
     Dim r As String: r = nameIn
-    r = Replace(r, " ", "_"): r = Replace(r, "/", "_"): r = Replace(r, "\\", "_")
+    r = Replace(r, " ", "_"): r = Replace(r, "/", "_"): r = Replace(r, "\\\\", "_")
     r = Replace(r, ":", "_"): r = Replace(r, "*", "_"): r = Replace(r, "?", "_")
     r = Replace(r, """", "_"): r = Replace(r, "<", "_"): r = Replace(r, ">", "_")
     r = Replace(r, "|", "_")
@@ -771,13 +775,13 @@ End Function
 
 ' ── JSON helpers ────────────────────────────────────────────────────────────
 Private Function JsonStr(ByVal s As String) As String
-    ' Escapa el string para JSON: \\ " y saltos de línea
-    s = Replace(s, "\\", "\\\\")
-    s = Replace(s, """", "\\""")
-    s = Replace(s, vbCrLf, "\\n")
-    s = Replace(s, vbLf, "\\n")
-    s = Replace(s, vbCr, "\\n")
-    s = Replace(s, vbTab, "\\t")
+    ' Escapa el string para JSON: \\\\ " y saltos de línea
+    s = Replace(s, "\\\\", "\\\\\\\\")
+    s = Replace(s, """", "\\\\""")
+    s = Replace(s, vbCrLf, "\\\\n")
+    s = Replace(s, vbLf, "\\\\n")
+    s = Replace(s, vbCr, "\\\\n")
+    s = Replace(s, vbTab, "\\\\t")
     JsonStr = """" & s & """"
 End Function
 

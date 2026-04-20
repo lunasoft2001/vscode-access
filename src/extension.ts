@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
 import { McpAccessClient } from "./mcp/mcpAccessClient";
 import { ACCESS_CATEGORIES } from "./models/types";
@@ -14,8 +15,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const configuration = () => vscode.workspace.getConfiguration("accessExplorer");
     const connectionStore = new ConnectionStore(context);
     const mcpClient = new McpAccessClient(configuration, context);
-    const secondBrainService = new SecondBrainService(mcpClient);
-    const bulkExportService = new BulkExportService(mcpClient);
+    const secondBrainService = new SecondBrainService(mcpClient, context.globalStorageUri.fsPath);
+    const bulkExportService = new BulkExportService(mcpClient, context.globalStorageUri.fsPath);
     const exportObjectsService = new ExportObjectsService(bulkExportService);
     const treeProvider = new AccessTreeProvider(connectionStore, mcpClient);
     const secondBrainOutput = vscode.window.createOutputChannel("Access Explorer SecondBrain");
@@ -80,10 +81,34 @@ export function activate(context: vscode.ExtensionContext): void {
             try {
                 await mcpClient.ensurePrerequisites();
                 treeProvider.refresh();
+                await registerMcpServerSilently(context, mcpClient);
             } catch {
                 // El cliente ya muestra diagnóstico y pasos de corrección.
             }
         }
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.registerMcpServer", async () => {
+            try {
+                const changed = await registerMcpServerSilently(context, mcpClient);
+                if (changed) {
+                    vscode.window.showInformationMessage(
+                        "Servidor MCP de Access registrado en mcp.json de usuario. Recarga VS Code para que Copilot lo detecte.",
+                        "Recargar"
+                    ).then(action => {
+                        if (action === "Recargar") {
+                            void vscode.commands.executeCommand("workbench.action.reloadWindow");
+                        }
+                    });
+                } else {
+                    vscode.window.showInformationMessage("El servidor MCP ya estaba registrado y está actualizado.");
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`No se pudo registrar el servidor MCP: ${message}`);
+            }
+        })
     );
 
     context.subscriptions.push(
@@ -1064,6 +1089,63 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
     // VS Code disposes subscriptions and closes the MCP transport via client.dispose.
+}
+
+/**
+ * Registers the MCP-Access server in the VS Code user-level mcp.json so that
+ * Copilot and other MCP-aware tools can discover and use it automatically.
+ *
+ * The user-level mcp.json lives at:
+ *   <userDataDir>/mcp.json   (e.g. %APPDATA%\Code\User\mcp.json on Windows)
+ *
+ * We derive the path from context.globalStorageUri which is always inside
+ * <userDataDir>/globalStorage/<extensionId>.
+ *
+ * @returns true if the file was written/changed, false if already up-to-date.
+ */
+async function registerMcpServerSilently(
+    context: vscode.ExtensionContext,
+    mcpClient: McpAccessClient
+): Promise<boolean> {
+    const info = await mcpClient.getMcpRuntimeInfo();
+
+    // globalStorageUri = .../Code/User/globalStorage/<ext-id>
+    // Two dirs up → .../Code/User
+    const userDataDir = path.resolve(context.globalStorageUri.fsPath, "..", "..");
+    const mcpJsonPath = path.join(userDataDir, "mcp.json");
+
+    // Read existing mcp.json or start with an empty object
+    let existing: { servers?: Record<string, unknown> } = {};
+    try {
+        const raw = fs.readFileSync(mcpJsonPath, "utf-8");
+        existing = JSON.parse(raw) as typeof existing;
+    } catch {
+        // File missing or invalid JSON — we will create/overwrite it
+    }
+
+    if (!existing.servers) {
+        existing.servers = {};
+    }
+
+    // Extract our server entry from the snippet the client already builds
+    const snippet = JSON.parse(info.mcpJsonSnippet) as { servers: Record<string, unknown> };
+    const serverKey = "access-explorer-local";
+    const newEntry = snippet.servers[serverKey];
+
+    // Check whether the entry is already identical (avoid unnecessary disk writes)
+    const existing_entry_json = JSON.stringify(existing.servers[serverKey]);
+    const new_entry_json = JSON.stringify(newEntry);
+    if (existing_entry_json === new_entry_json) {
+        return false;
+    }
+
+    existing.servers[serverKey] = newEntry;
+
+    // Ensure the directory exists (it always should, but be safe)
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(mcpJsonPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+
+    return true;
 }
 
 async function openDetailNode(
