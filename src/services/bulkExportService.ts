@@ -73,8 +73,7 @@ export class BulkExportService {
         const script = [
             `$app = New-Object -ComObject Access.Application`,
             `$app.Visible = $false`,
-            `try { $app.NewCurrentDatabase('${escapedPath}') }`,
-            `finally { $app.Quit() }`,
+            `try { $app.NewCurrentDatabase('${escapedPath}') } finally { $app.Quit() }`,
         ].join("; ");
         await exec(`powershell.exe -NoProfile -NonInteractive -Command "${script}"`, { timeout: 30_000 });
     }
