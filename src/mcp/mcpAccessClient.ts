@@ -1046,11 +1046,11 @@ export class McpAccessClient {
 
         if (uvAvailable) {
             await this.runCommand("uv", ["pip", "install", "--python", venvPython, "--upgrade", "pip"]);
-            await this.runCommand("uv", ["pip", "install", "--python", venvPython, "mcp", "pywin32", "Pillow"]);
         } else {
             await this.runCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
-            await this.runCommand(venvPython, ["-m", "pip", "install", "mcp", "pywin32", "Pillow"]);
         }
+
+        await this.installMcpRuntimeDependencies(uvAvailable, venvPython);
 
         // Algunos forks de MCP-Access no son instalables con -e (sin setup.py/pyproject.toml).
         // En ese caso intentamos instalar dependencias desde requirements*.txt y continuamos.
@@ -1122,6 +1122,95 @@ export class McpAccessClient {
         ].join("; ");
 
         await this.runCommand("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
+    }
+
+    private async installMcpRuntimeDependencies(uvAvailable: boolean, venvPython: string): Promise<void> {
+        if (process.platform === "win32") {
+            // On Windows (especially ARM64), force a wheel for cryptography to avoid local Rust/MSVC builds.
+            const cryptographyBinaryInstall = uvAvailable
+                ? await this.runCommand(
+                    "uv",
+                    ["pip", "install", "--python", venvPython, "--only-binary", ":all:", "cryptography"],
+                    undefined,
+                    true
+                )
+                : await this.runCommand(
+                    venvPython,
+                    ["-m", "pip", "install", "--only-binary", ":all:", "cryptography"],
+                    undefined,
+                    true
+                );
+
+            if (cryptographyBinaryInstall.exitCode !== 0) {
+                this.output.appendLine(
+                    "Aviso: no se pudo preinstalar cryptography con wheel binaria. Se continuará con la instalación estándar."
+                );
+                this.output.appendLine(`Detalle: ${cryptographyBinaryInstall.stderr || cryptographyBinaryInstall.stdout}`);
+            }
+        }
+
+        const installCoreDeps = async (): Promise<ShellResult> => {
+            if (uvAvailable) {
+                return await this.runCommand(
+                    "uv",
+                    ["pip", "install", "--python", venvPython, "mcp", "pywin32", "Pillow"],
+                    undefined,
+                    true
+                );
+            }
+
+            return await this.runCommand(
+                venvPython,
+                ["-m", "pip", "install", "mcp", "pywin32", "Pillow"],
+                undefined,
+                true
+            );
+        };
+
+        let depInstall = await installCoreDeps();
+        if (depInstall.exitCode !== 0 && this.isCryptographyBuildFailure(depInstall.stderr || depInstall.stdout)) {
+            this.output.appendLine(
+                "Detectado error de compilación de cryptography. Reintentando tras forzar instalación binaria..."
+            );
+
+            const forcedBinary = uvAvailable
+                ? await this.runCommand(
+                    "uv",
+                    ["pip", "install", "--python", venvPython, "--only-binary", ":all:", "cryptography"],
+                    undefined,
+                    true
+                )
+                : await this.runCommand(
+                    venvPython,
+                    ["-m", "pip", "install", "--only-binary", ":all:", "cryptography"],
+                    undefined,
+                    true
+                );
+
+            if (forcedBinary.exitCode !== 0) {
+                this.output.appendLine(`Aviso: reintento de cryptography binaria fallido: ${forcedBinary.stderr || forcedBinary.stdout}`);
+            }
+
+            depInstall = await installCoreDeps();
+        }
+
+        if (depInstall.exitCode !== 0) {
+            throw new Error(
+                `No se pudieron instalar dependencias Python base (mcp, pywin32, Pillow): ${depInstall.stderr || depInstall.stdout}`
+            );
+        }
+    }
+
+    private isCryptographyBuildFailure(details: string): boolean {
+        const normalized = details.toLowerCase();
+        return normalized.includes("cryptography")
+            && (
+                normalized.includes("failed building wheel")
+                || normalized.includes("failed-wheel-build-for-install")
+                || normalized.includes("subprocess-exited-with-error")
+                || normalized.includes("maturin")
+                || normalized.includes("link.exe")
+            );
     }
 
     private async detectPythonBootstrapCommand(): Promise<PythonBootstrapCommand> {
@@ -1446,12 +1535,13 @@ export class McpAccessClient {
             "",
             "## Comprobaciones sugeridas",
             "",
-            "1. Verificar que Git esté instalado y en PATH (comando: git --version).",
-            "2. Verificar que Python 3.9+ esté instalado (comando: py -3 --version o python --version).",
-            "3. Verificar que estén instalados los paquetes Python 'mcp' y 'pywin32'.",
+            "1. Verificar que Python 3.9+ esté instalado (comando: py -3 --version o python --version).",
+            "2. En Windows ARM64, instalar cryptography con wheel binaria: pip install --only-binary :all: cryptography.",
+            "3. Verificar que estén instalados los paquetes Python 'mcp', 'pywin32' y 'Pillow'.",
             "4. Confirmar que Microsoft Access está instalado en el equipo.",
             "5. Habilitar 'Trust access to the VBA project object model' en Access.",
-            "6. Comprobar permisos de escritura en la carpeta de instalación.",
+            "6. Git es opcional (la extensión usa fallback por ZIP), pero si está instalado, comprobar PATH con: git --version.",
+            "7. Comprobar permisos de escritura en la carpeta de instalación.",
             "",
             "## Rutas usadas por la instalación",
             "",
@@ -1462,10 +1552,18 @@ export class McpAccessClient {
             "## Instalación manual alternativa",
             "",
             "```powershell",
+            "# Opción A: con Git",
             "git clone https://github.com/unmateria/MCP-Access.git",
             "cd MCP-Access",
+            "",
+            "# Opción B: sin Git (descarga ZIP)",
+            "$zip = \"$env:TEMP\\MCP-Access-main.zip\"",
+            "Invoke-WebRequest https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip -OutFile $zip",
+            "Expand-Archive -Path $zip -DestinationPath . -Force",
+            "cd .\\MCP-Access-main",
             "py -3 -m venv .venv",
             ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
+            ".\\.venv\\Scripts\\python.exe -m pip install --only-binary :all: cryptography",
             ".\\.venv\\Scripts\\python.exe -m pip install mcp pywin32 Pillow",
             ".\\.venv\\Scripts\\python.exe -m pip install -e .   # si existe setup.py/pyproject.toml",
             ".\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt   # alternativa",

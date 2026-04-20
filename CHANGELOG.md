@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.0.18 - 2026-04-20
+
+- Hardened MCP-Access setup on Windows by preinstalling `cryptography` with `--only-binary :all:` to avoid source builds that require Rust/MSVC toolchains.
+- Added automatic retry logic when dependency installation fails with common `cryptography` build errors (`link.exe`, `maturin`, wheel build failures).
+- Improved installation diagnostics with explicit Windows ARM64 guidance and a no-Git ZIP-based manual fallback.
+
 ## 1.0.14 - 2026-04-06
 
 - Added `Access: Show MCP Runtime` command to make runtime paths visible from the extension UI.

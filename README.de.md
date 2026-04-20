@@ -51,10 +51,19 @@ Datei > Optionen > Trust Center > Einstellungen für das Trust Center > Makroein
 Server klonen oder herunterladen von [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
 
 ```powershell
+# Option A: mit Git
 git clone https://github.com/unmateria/MCP-Access.git
 cd MCP-Access
+
+# Option B: ohne Git (ZIP-Download)
+$zip = "$env:TEMP\MCP-Access-main.zip"
+Invoke-WebRequest https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip -OutFile $zip
+Expand-Archive -Path $zip -DestinationPath . -Force
+cd .\MCP-Access-main
+
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install --only-binary :all: cryptography   # empfohlen auf Windows ARM64
 .\.venv\Scripts\python.exe -m pip install mcp pywin32 Pillow
 ```
 

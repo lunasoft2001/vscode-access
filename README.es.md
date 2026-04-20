@@ -51,10 +51,19 @@ Archivo > Opciones > Centro de confianza > Configuración del Centro de confianz
 Clona o descarga el servidor desde [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
 
 ```powershell
+# Opción A: con Git
 git clone https://github.com/unmateria/MCP-Access.git
 cd MCP-Access
+
+# Opción B: sin Git (descarga ZIP)
+$zip = "$env:TEMP\MCP-Access-main.zip"
+Invoke-WebRequest https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip -OutFile $zip
+Expand-Archive -Path $zip -DestinationPath . -Force
+cd .\MCP-Access-main
+
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install --only-binary :all: cryptography   # recomendado en Windows ARM64
 .\.venv\Scripts\python.exe -m pip install mcp pywin32 Pillow
 ```
 
@@ -120,8 +129,9 @@ Una vez instalada, los siguientes ajustes están disponibles en **Ajustes** de V
 Este README incluye ahora un resumen corto de cambios por versión.
 Para el detalle completo, consulta [CHANGELOG.md](CHANGELOG.md).
 
-- **v1.0.13**: Instala automáticamente `Pillow` si falta PIL al capturar pantallas; flujo guiado de reparación cuando falta el módulo `mcp_access`.
+- **v1.0.18**: Endurece la instalación en Windows/ARM64 forzando wheel binaria para `cryptography`; añade reintento automático tras errores de compilación y guía manual sin Git (ZIP).
 - **v1.0.14**: Añade `Access: Mostrar runtime MCP` con copia directa de bloque `mcp.json` y acceso a la carpeta runtime.
+- **v1.0.13**: Instala automáticamente `Pillow` si falta PIL al capturar pantallas; flujo guiado de reparación cuando falta el módulo `mcp_access`.
 - **v1.0.12**: Activa automáticamente (best effort) el acceso VBA del Trust Center (`AccessVBOM`) durante el setup.
 - **v1.0.11**: Usa por defecto runtime MCP gestionado por la extensión (`globalStorage`).
 - **v1.0.10**: Añade fallback por ZIP de MCP-Access cuando Git no está disponible.
