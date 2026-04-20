@@ -373,14 +373,23 @@ export class SecondBrainService {
                 SecondBrainService.UI_TIMEOUT_MS
             );
 
+            const propVal = (key: string): string | undefined =>
+                properties.find((p) => p.name.toLowerCase() === key)?.value;
             const uiObj = {
                 name: objectName,
                 record_source: recordSource,
+                allow_edits: propVal("allowedits"),
+                allow_additions: propVal("allowadditions"),
+                allow_deletions: propVal("allowdeletions"),
+                default_view: propVal("defaultview"),
+                modal: propVal("modal"),
+                pop_up: propVal("popup"),
                 controls: controls.map((ctrl) => ({
                     name: ctrl.name,
                     control_type: ctrl.type_name,
                     control_source: ctrl.control_source,
-                    caption: fixEncoding(ctrl.caption)
+                    caption: fixEncoding(ctrl.caption),
+                    source_object: ctrl.source_object
                 })),
                 code: doc.content,
                 procedures: extractVbaProcedures(doc.content)
@@ -565,7 +574,8 @@ export class SecondBrainService {
             "startup/startup-options",
             "_index",
             "_overview",
-            "_health"
+            "_health",
+            "_dependencies"
         ]);
 
         const noteDrafts = new Map<string, NoteDraft>();
@@ -647,6 +657,24 @@ export class SecondBrainService {
                 });
             }
 
+            const fksFromTable = metadata.foreign_keys.filter((fk) => String(fk.fk_table ?? "") === name);
+            const fksToTable = metadata.foreign_keys.filter((fk) => String(fk.ref_table ?? "") === name);
+            if (fksFromTable.length > 0) {
+                lines.push("", "## Foreign Keys", "", "| FK Name | Column | Ref Table | Ref Column |", "|---|---|---|---|");
+                for (const fk of fksFromTable) {
+                    const refTarget = tableTargets.get(String(fk.ref_table ?? ""));
+                    if (refTarget) { outgoing.add(refTarget); }
+                    lines.push(`| ${fk.fk_name ?? ""} | ${fk.fk_column ?? ""} | ${refTarget ? wiki(refTarget) : String(fk.ref_table ?? "")} | ${fk.ref_column ?? ""} |`);
+                }
+            }
+            if (fksToTable.length > 0) {
+                lines.push("", "## Referenciado por FK", "", "| FK Name | From Table | Via Column |", "|---|---|---|");
+                for (const fk of fksToTable) {
+                    const fkTarget = tableTargets.get(String(fk.fk_table ?? ""));
+                    lines.push(`| ${fk.fk_name ?? ""} | ${fkTarget ? wiki(fkTarget) : String(fk.fk_table ?? "")} | ${fk.fk_column ?? ""} |`);
+                }
+            }
+
             registerNote(tableNotePath, lines, outgoing);
         }
 
@@ -708,6 +736,16 @@ export class SecondBrainService {
             for (const link of extractVbaObjectLinks(
                 String(form.code ?? ""), formTargets, reportTargets, queryTargets, macroTargets, tableTargets, moduleTargets
             )) { outgoing.add(link); }
+            for (const ctrl of Array.isArray(form.controls) ? (form.controls as Array<Record<string, unknown>>) : []) {
+                const typeName = String(ctrl.control_type ?? "").toLowerCase();
+                if (typeName.includes("subform") || typeName.includes("subreport")) {
+                    const sourceObj = normalizeIdentifier(String(ctrl.source_object ?? ""));
+                    if (sourceObj) {
+                        const subTarget = formTargets.get(sourceObj) ?? reportTargets.get(sourceObj);
+                        if (subTarget) { outgoing.add(subTarget); }
+                    }
+                }
+            }
             const mocPath = mocByNotePath.get(formNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
@@ -722,6 +760,16 @@ export class SecondBrainService {
             for (const link of extractVbaObjectLinks(
                 String(report.code ?? ""), formTargets, reportTargets, queryTargets, macroTargets, tableTargets, moduleTargets
             )) { outgoing.add(link); }
+            for (const ctrl of Array.isArray(report.controls) ? (report.controls as Array<Record<string, unknown>>) : []) {
+                const typeName = String(ctrl.control_type ?? "").toLowerCase();
+                if (typeName.includes("subform") || typeName.includes("subreport")) {
+                    const sourceObj = normalizeIdentifier(String(ctrl.source_object ?? ""));
+                    if (sourceObj) {
+                        const subTarget = reportTargets.get(sourceObj) ?? formTargets.get(sourceObj);
+                        if (subTarget) { outgoing.add(subTarget); }
+                    }
+                }
+            }
             const mocPath = mocByNotePath.get(reportNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
@@ -775,6 +823,7 @@ export class SecondBrainService {
             const procs = Array.isArray(module.procedures)
                 ? (module.procedures as Array<{ kind: string; name: string; visibility: string }>)
                 : [];
+            const codeLines = countVbaCodeLines(String(module.code ?? ""));
             const procSection = procs.length > 0
                 ? [
                     `## Procedures (${procs.length})`,
@@ -787,6 +836,9 @@ export class SecondBrainService {
                 : [];
             const content = [
                 `# Module: ${name}`,
+                "",
+                `- Procedures: ${procs.length}`,
+                `- Code lines: ${codeLines}`,
                 "",
                 ...procSection,
                 "## Code",
@@ -872,6 +924,35 @@ export class SecondBrainService {
             ""
         ].join("\n");
 
+        // Health checks
+        const formsNoSource = metadata.forms
+            .filter((f) => !String(f.record_source ?? "").trim())
+            .map((f) => String(f.name ?? ""));
+        const tablesNoRel = metadata.tables
+            .filter((t) => {
+                const tname = String(t.table_name ?? "");
+                return !metadata.relationships.some((r) => String(r.table ?? "") === tname || String(r.foreign_table ?? "") === tname);
+            })
+            .map((t) => String(t.table_name ?? ""));
+        const modulesNoProcs = metadata.modules
+            .filter((m) => !(Array.isArray(m.procedures) ? m.procedures : []).length)
+            .map((m) => String(m.name ?? ""));
+        const queriesNoSql = metadata.queries
+            .filter((q) => !String(q.sql ?? "").trim())
+            .map((q) => String(q.name ?? ""));
+
+        const refsSection: string[] = metadata.references.length > 0
+            ? [
+                "",
+                "## Referencias VBA",
+                "",
+                "| Nombre | GUID | Path |",
+                "|---|---|---|",
+                ...metadata.references.map((r) => `| ${r.name ?? ""} | ${r.guid ?? ""} | ${r.path ?? ""} |`),
+                ""
+            ]
+            : ["", "## Referencias VBA", "", "- None", ""];
+
         const overviewContent = [
             `# Overview: ${metadata.database}`,
             "",
@@ -880,7 +961,7 @@ export class SecondBrainService {
             "## Resumen",
             "",
             ...Object.entries(stats).map(([key, value]) => `- ${key}: ${value}`),
-            "",
+            ...refsSection,
             "## MOCs",
             "",
             ...(mocGroups.size > 0 ? Array.from(mocGroups.keys()).sort().map((mocPath) => `- ${wiki(mocPath)}`) : ["- None"]),
@@ -890,17 +971,88 @@ export class SecondBrainService {
         const healthContent = [
             "# Health",
             "",
-            metadata.warnings.length > 0 ? "## Warnings" : "## Warnings",
+            "## Warnings",
             "",
-            ...(metadata.warnings.length > 0
-                ? metadata.warnings.map((warning) => `- ${warning}`)
-                : ["- None"]),
+            ...(metadata.warnings.length > 0 ? metadata.warnings.map((w) => `- ${w}`) : ["- None"]),
+            "",
+            `## Formularios sin RecordSource (${formsNoSource.length})`,
+            "",
+            ...(formsNoSource.length > 0
+                ? formsNoSource.map((n) => `- ${wiki(`forms/${sanitize(n)}`)}`) : ["- None"]),
+            "",
+            `## Tablas sin relaciones (${tablesNoRel.length})`,
+            "",
+            ...(tablesNoRel.length > 0
+                ? tablesNoRel.map((n) => `- ${wiki(`tables/${sanitize(n)}`)}`) : ["- None"]),
+            "",
+            `## Módulos sin procedimientos (${modulesNoProcs.length})`,
+            "",
+            ...(modulesNoProcs.length > 0
+                ? modulesNoProcs.map((n) => `- ${wiki(`modules/${sanitize(n)}`)}`) : ["- None"]),
+            "",
+            `## Consultas sin SQL (${queriesNoSql.length})`,
+            "",
+            ...(queriesNoSql.length > 0
+                ? queriesNoSql.map((n) => `- ${wiki(`queries/${sanitize(n)}`)}`) : ["- None"]),
             ""
         ].join("\n");
 
-        registerNote("_index", indexContent.split("\n"), ["_overview", "_health"]);
-        registerNote("_overview", overviewContent.split("\n"), ["_index", "_health", ...mocGroups.keys()]);
+        // _dependencies note: cross-reference map
+        const depsOutgoing = new Set<string>();
+        const depsLines: string[] = [
+            "# Dependencias",
+            "",
+            "## Formularios → Fuente de datos",
+            "",
+            "| Formulario | RecordSource |",
+            "|---|---|"
+        ];
+        for (const form of metadata.forms) {
+            const fName = String(form.name ?? "");
+            const fPath = formTargets.get(fName);
+            const rs = String(form.record_source ?? "");
+            const rsNorm = normalizeIdentifier(rs);
+            const rsTarget = tableTargets.get(rsNorm) ?? queryTargets.get(rsNorm);
+            if (fPath) {
+                depsOutgoing.add(fPath);
+                if (rsTarget) { depsOutgoing.add(rsTarget); }
+                depsLines.push(`| ${wiki(fPath)} | ${rsTarget ? wiki(rsTarget) : (rs || "-")} |`);
+            }
+        }
+        depsLines.push("", "## Consultas → Objetos usados", "", "| Consulta | Tipo | Depende de |", "|---|---|---|");
+        for (const query of metadata.queries) {
+            const qName = String(query.name ?? "");
+            const qPath = queryTargets.get(qName);
+            const qDeps = queryDependenciesByQuery.get(qName) ?? new Set<string>();
+            if (qPath) {
+                depsOutgoing.add(qPath);
+                for (const d of qDeps) { depsOutgoing.add(d); }
+                const depsStr = Array.from(qDeps).sort().map((t) => wiki(t)).join(", ") || "-";
+                depsLines.push(`| ${wiki(qPath)} | ${query.type ?? ""} | ${depsStr} |`);
+            }
+        }
+        depsLines.push("", "## Tablas → Quién las usa", "", "| Tabla | Queries | Formularios |", "|---|---|---|");
+        for (const table of metadata.tables) {
+            const tName = String(table.table_name ?? "");
+            const tPath = tableTargets.get(tName);
+            if (!tPath) { continue; }
+            depsOutgoing.add(tPath);
+            const usedByQueries = metadata.queries
+                .filter((q) => (queryDependenciesByQuery.get(String(q.name ?? "")) ?? new Set()).has(tPath))
+                .map((q) => { const p = queryTargets.get(String(q.name ?? "")); return p ? wiki(p) : ""; })
+                .filter(Boolean).join(", ") || "-";
+            const usedByForms = metadata.forms
+                .filter((f) => normalizeIdentifier(String(f.record_source ?? "")) === tName)
+                .map((f) => { const p = formTargets.get(String(f.name ?? "")); return p ? wiki(p) : ""; })
+                .filter(Boolean).join(", ") || "-";
+            depsLines.push(`| ${wiki(tPath)} | ${usedByQueries} | ${usedByForms} |`);
+        }
+        depsLines.push("");
+
+        registerNote("_index", indexContent.split("\n"), ["_overview", "_health", "_dependencies"]);
+        registerNote("_overview", overviewContent.split("\n"), ["_index", "_health", "_dependencies", ...mocGroups.keys()]);
         registerNote("_health", healthContent.split("\n"), ["_index", "_overview"]);
+        registerNote("_dependencies", depsLines, depsOutgoing);
 
         const incomingByTarget = new Map<string, Set<string>>();
         for (const [sourcePath, draft] of noteDrafts.entries()) {
@@ -942,11 +1094,21 @@ export class SecondBrainService {
             ? (item.procedures as Array<{ kind: string; name: string; visibility: string }>)
             : [];
         const sortedDependencies = Array.from(dependencies).sort();
+
+        const propLines: string[] = [];
+        if (item.allow_edits !== undefined) { propLines.push(`- AllowEdits: ${item.allow_edits}`); }
+        if (item.allow_additions !== undefined) { propLines.push(`- AllowAdditions: ${item.allow_additions}`); }
+        if (item.allow_deletions !== undefined) { propLines.push(`- AllowDeletions: ${item.allow_deletions}`); }
+        if (item.default_view !== undefined) { propLines.push(`- DefaultView: ${item.default_view}`); }
+        if (item.modal !== undefined) { propLines.push(`- Modal: ${item.modal}`); }
+        if (item.pop_up !== undefined) { propLines.push(`- PopUp: ${item.pop_up}`); }
+
         const header = [
             `# ${kind}: ${item.name ?? ""}`,
             "",
             `- RecordSource: ${item.record_source ?? ""}`,
             `- Controls: ${controls.length}`,
+            ...propLines,
             ""
         ];
 
@@ -968,13 +1130,13 @@ export class SecondBrainService {
             "",
             "## Controls",
             "",
-            "| Name | Type | Source | Caption |",
-            "|---|---|---|"
+            "| Name | Type | Source | Caption | SubForm |",
+            "|---|---|---|---|---|"
         );
 
         for (const control of controls as Array<Record<string, unknown>>) {
             header.push(
-                `| ${control.name ?? ""} | ${control.control_type ?? ""} | ${control.control_source ?? ""} | ${control.caption ?? ""} | `
+                `| ${control.name ?? ""} | ${control.control_type ?? ""} | ${control.control_source ?? ""} | ${control.caption ?? ""} | ${control.source_object ?? ""} |`
             );
         }
 
@@ -1238,6 +1400,15 @@ function extractVbaProcedures(code: string): Array<{ kind: string; name: string;
         }
     }
     return procedures;
+}
+
+function countVbaCodeLines(code: string): number {
+    return code
+        .split(/\r?\n/)
+        .filter((line) => {
+            const trimmed = line.trim();
+            return trimmed.length > 0 && !trimmed.startsWith("'");
+        }).length;
 }
 
 function inferDomainKey(name: string): string {

@@ -43,6 +43,7 @@ export interface AccessControlInfo {
     type_name?: string;
     control_source?: string;
     caption?: string;
+    source_object?: string;
     left?: number;
     top?: number;
     width?: number;

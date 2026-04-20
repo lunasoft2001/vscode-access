@@ -569,6 +569,7 @@ export class McpAccessClient {
             type_name: ctrl.type_name ? String(ctrl.type_name) : undefined,
             control_source: ctrl.control_source ? String(ctrl.control_source) : undefined,
             caption: ctrl.caption ? String(ctrl.caption) : undefined,
+            source_object: ctrl.source_object ? String(ctrl.source_object) : undefined,
             left: toNumber(ctrl.left),
             top: toNumber(ctrl.top),
             width: toNumber(ctrl.width),
