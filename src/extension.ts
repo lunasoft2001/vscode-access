@@ -1,19 +1,29 @@
 import * as vscode from "vscode";
 import * as fs from "node:fs";
-import { DetailNode, ObjectNode } from "./models/treeNodes";
+import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
 import { McpAccessClient } from "./mcp/mcpAccessClient";
 import { ACCESS_CATEGORIES } from "./models/types";
 import { AccessTreeProvider } from "./providers/accessTreeProvider";
 import { ConnectionStore } from "./services/connectionStore";
+import { SecondBrainService } from "./services/secondBrainService";
+import { BulkExportService } from "./services/bulkExportService";
+import { ExportObjectsService } from "./services/exportObjectsService";
 import { offerAccessRestart, restartAccessProcesses } from "./utils/accessRecovery";
 
 export function activate(context: vscode.ExtensionContext): void {
     const configuration = () => vscode.workspace.getConfiguration("accessExplorer");
     const connectionStore = new ConnectionStore(context);
     const mcpClient = new McpAccessClient(configuration, context);
+    const secondBrainService = new SecondBrainService(mcpClient);
+    const bulkExportService = new BulkExportService(mcpClient);
+    const exportObjectsService = new ExportObjectsService(bulkExportService);
     const treeProvider = new AccessTreeProvider(connectionStore, mcpClient);
+    const secondBrainOutput = vscode.window.createOutputChannel("Access Explorer SecondBrain");
+    const secondBrainStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+    secondBrainStatusBar.tooltip = "Estado de generación de SecondBrain";
 
     context.subscriptions.push(mcpClient);
+    context.subscriptions.push(secondBrainOutput, secondBrainStatusBar);
 
     // Tracks opened Access code documents so they can be saved back
     interface AccessCodeMeta {
@@ -422,6 +432,110 @@ export function activate(context: vscode.ExtensionContext): void {
         return pick?.connection;
     }
 
+    async function pickOutputFolder(title: string): Promise<string | undefined> {
+        const folder = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            title,
+            openLabel: "Seleccionar carpeta"
+        });
+
+        return folder?.[0]?.fsPath;
+    }
+
+    async function pickSecondBrainLinkDensity(): Promise<"standard" | "high" | undefined> {
+        const pick = await vscode.window.showQuickPick(
+            [
+                {
+                    label: "Normal",
+                    description: "Enlaces base + backlinks",
+                    detail: "Más rápido, grafo limpio",
+                    value: "standard" as const
+                },
+                {
+                    label: "Alta densidad",
+                    description: "Incluye MOCs automáticos por dominio",
+                    detail: "Más conexiones en el grafo de Obsidian",
+                    value: "high" as const
+                }
+            ],
+            {
+                title: "Densidad de enlaces SecondBrain",
+                placeHolder: "Selecciona cómo quieres generar las interconexiones"
+            }
+        );
+
+        return pick?.value;
+    }
+
+    async function runSecondBrainExport(
+        title: string,
+        runner: (options: Parameters<typeof secondBrainService.exportSecondBrain>[3]) => Promise<import("./services/secondBrainService").SecondBrainExportResult>
+    ): Promise<import("./services/secondBrainService").SecondBrainExportResult> {
+        secondBrainOutput.clear();
+        secondBrainOutput.show(true);
+        secondBrainStatusBar.text = "$(sync~spin) SecondBrain: iniciando...";
+        secondBrainStatusBar.show();
+
+        const executeOnce = async (): Promise<import("./services/secondBrainService").SecondBrainExportResult> => {
+            let lastPercent = 0;
+
+            await mcpClient.reconnect();
+            secondBrainOutput.appendLine("[inventory] MCP reconectado para iniciar exportación.");
+
+            return await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title,
+                    cancellable: false
+                },
+                async (progress) => {
+                    return await runner({
+                        onProgress: async (event) => {
+                            const prefix = `[${event.phase}]`;
+                            secondBrainOutput.appendLine(`${prefix} ${event.message}`);
+                            secondBrainStatusBar.text = `$(sync~spin) SecondBrain: ${event.message}`;
+
+                            if (typeof event.completed === "number" && typeof event.total === "number" && event.total > 0) {
+                                const percent = Math.min(100, Math.max(0, Math.floor((event.completed / event.total) * 100)));
+                                const increment = Math.max(0, percent - lastPercent);
+                                lastPercent = percent;
+                                progress.report({ increment, message: event.message });
+                                return;
+                            }
+
+                            progress.report({ message: event.message });
+                        }
+                    });
+                }
+            );
+        };
+
+        try {
+            return await executeOnce();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            secondBrainOutput.appendLine(`[error] ${message}`);
+
+            const recovered = await offerAccessRestart(message);
+            if (!recovered) {
+                throw error;
+            }
+
+            secondBrainOutput.appendLine("[inventory] Access reiniciado. Reintentando exportación una vez...");
+            await mcpClient.reconnect();
+            return await executeOnce();
+        } finally {
+            try {
+                await mcpClient.disconnect();
+            } catch {
+                // ignore cleanup errors
+            }
+            secondBrainStatusBar.hide();
+        }
+    }
+
     // Helper to execute SQL and show result as markdown table (SELECT) or DML confirmation
     async function runSqlAndShow(connection: import("./models/types").AccessConnection, sql: string): Promise<void> {
         const trimmed = sql.trim();
@@ -683,6 +797,267 @@ export function activate(context: vscode.ExtensionContext): void {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error en Compact & Repair: ${message}`);
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.secondBrain.full", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para SecondBrain (completo)");
+            if (!connection) {
+                return;
+            }
+
+            const linkDensity = await pickSecondBrainLinkDensity();
+            if (!linkDensity) {
+                return;
+            }
+
+            const outputDir = await pickOutputFolder("Seleccionar carpeta de salida para SecondBrain completo");
+            if (!outputDir) {
+                return;
+            }
+
+            try {
+                const result = await runSecondBrainExport(
+                    `Generando SecondBrain completo de ${connection.name}...`,
+                    (options) => secondBrainService.exportSecondBrain(connection, outputDir, { mode: "full" }, {
+                        ...options,
+                        linkDensity
+                    })
+                );
+
+                const action = await vscode.window.showInformationMessage(
+                    `SecondBrain completo generado (${result.stats.tables} tablas, ${result.stats.queries} consultas).`,
+                    "Abrir carpeta",
+                    "Abrir índice"
+                );
+
+                if (action === "Abrir carpeta") {
+                    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
+                }
+
+                if (action === "Abrir índice") {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`No se pudo generar SecondBrain completo: ${message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.secondBrain.category", async (node?: CategoryNode) => {
+            let connection = node?.connection;
+            let categoryKey = node?.categoryKey;
+
+            if (!connection) {
+                connection = await pickConnection("Seleccionar base de datos para SecondBrain por tipo");
+            }
+
+            if (!connection) {
+                return;
+            }
+
+            if (!categoryKey) {
+                const pick = await vscode.window.showQuickPick(
+                    ACCESS_CATEGORIES.map((category) => ({
+                        label: category.label,
+                        detail: category.key,
+                        categoryKey: category.key
+                    })),
+                    { title: "Seleccionar tipo de objeto para SecondBrain" }
+                );
+                categoryKey = pick?.categoryKey;
+            }
+
+            if (!categoryKey) {
+                return;
+            }
+
+            const linkDensity = await pickSecondBrainLinkDensity();
+            if (!linkDensity) {
+                return;
+            }
+
+            const outputDir = await pickOutputFolder(`Seleccionar carpeta de salida para ${categoryKey}`);
+            if (!outputDir) {
+                return;
+            }
+
+            try {
+                const result = await runSecondBrainExport(
+                    `Generando SecondBrain (${categoryKey}) de ${connection.name}...`,
+                    (options) => secondBrainService.exportSecondBrain(connection, outputDir, { mode: "category", categoryKey }, {
+                        ...options,
+                        linkDensity
+                    })
+                );
+
+                const action = await vscode.window.showInformationMessage(
+                    `SecondBrain por tipo generado (${categoryKey}).`,
+                    "Abrir carpeta",
+                    "Abrir índice"
+                );
+
+                if (action === "Abrir carpeta") {
+                    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
+                }
+
+                if (action === "Abrir índice") {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`No se pudo generar SecondBrain por tipo: ${message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.secondBrain.object", async (node?: ObjectNode) => {
+            if (!node) {
+                vscode.window.showInformationMessage("Selecciona un objeto en el árbol para generar su SecondBrain individual.");
+                return;
+            }
+
+            const linkDensity = await pickSecondBrainLinkDensity();
+            if (!linkDensity) {
+                return;
+            }
+
+            const outputDir = await pickOutputFolder(`Seleccionar carpeta de salida para ${node.objectInfo.name}`);
+            if (!outputDir) {
+                return;
+            }
+
+            try {
+                const result = await runSecondBrainExport(
+                    `Generando SecondBrain del objeto ${node.objectInfo.name}...`,
+                    (options) => secondBrainService.exportSecondBrain(node.connection, outputDir, {
+                        mode: "object",
+                        categoryKey: node.categoryKey,
+                        objectInfo: node.objectInfo
+                    }, {
+                        ...options,
+                        linkDensity
+                    })
+                );
+
+                const action = await vscode.window.showInformationMessage(
+                    `SecondBrain individual generado para ${node.objectInfo.name}.`,
+                    "Abrir carpeta",
+                    "Abrir índice"
+                );
+
+                if (action === "Abrir carpeta") {
+                    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
+                }
+
+                if (action === "Abrir índice") {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`No se pudo generar SecondBrain individual: ${message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.exportObjects.full", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para exportar objetos (completo)");
+            if (!connection) {
+                return;
+            }
+
+            const outputDir = await pickOutputFolder("Seleccionar carpeta de salida para exportar objetos");
+            if (!outputDir) {
+                return;
+            }
+
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: `Exportando objetos de ${connection.name}...`, cancellable: false },
+                async () => {
+                    try {
+                        const result = await exportObjectsService.exportObjects(
+                            connection,
+                            outputDir,
+                            { mode: "full" }
+                        );
+                        const action = await vscode.window.showInformationMessage(
+                            `Objetos exportados en ${result.outputDir}`,
+                            "Abrir carpeta"
+                        );
+                        if (action === "Abrir carpeta") {
+                            await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
+                        }
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        vscode.window.showErrorMessage(`No se pudo exportar objetos: ${message}`);
+                    }
+                }
+            );
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.exportObjects.category", async (node?: CategoryNode) => {
+            let connection = node?.connection;
+            let categoryKey = node?.categoryKey;
+
+            if (!connection) {
+                connection = await pickConnection("Seleccionar base de datos para exportar por tipo");
+            }
+            if (!connection) {
+                return;
+            }
+
+            if (!categoryKey) {
+                const pick = await vscode.window.showQuickPick(
+                    ACCESS_CATEGORIES.map((category) => ({
+                        label: category.label,
+                        detail: category.key,
+                        categoryKey: category.key
+                    })),
+                    { title: "Seleccionar tipo de objeto a exportar" }
+                );
+                categoryKey = pick?.categoryKey;
+            }
+            if (!categoryKey) {
+                return;
+            }
+
+            const outputDir = await pickOutputFolder(`Seleccionar carpeta de salida para exportar ${categoryKey}`);
+            if (!outputDir) {
+                return;
+            }
+
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: `Exportando ${categoryKey} de ${connection.name}...`, cancellable: false },
+                async () => {
+                    try {
+                        const result = await exportObjectsService.exportObjects(
+                            connection,
+                            outputDir,
+                            { mode: "category", categoryKey }
+                        );
+                        const action = await vscode.window.showInformationMessage(
+                            `Tipo "${categoryKey}" exportado en ${result.outputDir}`,
+                            "Abrir carpeta"
+                        );
+                        if (action === "Abrir carpeta") {
+                            await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
+                        }
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        vscode.window.showErrorMessage(`No se pudo exportar por tipo: ${message}`);
+                    }
+                }
+            );
         })
     );
 }

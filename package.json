@@ -39,7 +39,12 @@
         "onCommand:accessExplorer.pickSqlConnection",
         "onCommand:accessExplorer.saveCodeToAccess",
         "onCommand:accessExplorer.compileVba",
-        "onCommand:accessExplorer.compactRepair"
+        "onCommand:accessExplorer.compactRepair",
+        "onCommand:accessExplorer.secondBrain.full",
+        "onCommand:accessExplorer.secondBrain.category",
+        "onCommand:accessExplorer.secondBrain.object",
+        "onCommand:accessExplorer.exportObjects.full",
+        "onCommand:accessExplorer.exportObjects.category"
     ],
     "main": "./dist/extension.js",
     "contributes": {
@@ -135,6 +140,31 @@
                 "command": "accessExplorer.compactRepair",
                 "title": "%command.compactRepair.title%",
                 "icon": "$(wrench)"
+            },
+            {
+                "command": "accessExplorer.secondBrain.full",
+                "title": "%command.secondBrainFull.title%",
+                "icon": "$(book)"
+            },
+            {
+                "command": "accessExplorer.secondBrain.category",
+                "title": "%command.secondBrainCategory.title%",
+                "icon": "$(list-tree)"
+            },
+            {
+                "command": "accessExplorer.secondBrain.object",
+                "title": "%command.secondBrainObject.title%",
+                "icon": "$(symbol-object)"
+            },
+            {
+                "command": "accessExplorer.exportObjects.full",
+                "title": "%command.exportObjectsFull.title%",
+                "icon": "$(export)"
+            },
+            {
+                "command": "accessExplorer.exportObjects.category",
+                "title": "%command.exportObjectsCategory.title%",
+                "icon": "$(export)"
             }
         ],
         "menus": {
@@ -173,6 +203,11 @@
                     "command": "accessExplorer.openSqlEditor",
                     "when": "view == accessExplorerView",
                     "group": "navigation@7"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@8"
                 }
             ],
             "editor/title": [
@@ -218,8 +253,23 @@
                     "group": "1_actions@2"
                 },
                 {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@3"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.category",
+                    "when": "view == accessExplorerView && viewItem == accessCategory",
+                    "group": "2_actions@1"
+                },
+                {
                     "command": "accessExplorer.showDetails",
                     "when": "view == accessExplorerView && viewItem == accessObject"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.object",
+                    "when": "view == accessExplorerView && viewItem == accessObject",
+                    "group": "2_actions@2"
                 }
             ]
         },

@@ -30,6 +30,32 @@ interface AccessRelationship {
     foreign_table?: string;
 }
 
+interface AccessLinkedTable {
+    name: string;
+    source_table?: string;
+    connect_string?: string;
+    is_odbc?: boolean;
+}
+
+interface AccessStartupOption {
+    name: string;
+    value?: unknown;
+    source?: string;
+}
+
+interface AccessIndexField {
+    name?: string;
+    order?: string;
+}
+
+interface AccessIndexInfo {
+    name: string;
+    fields?: AccessIndexField[];
+    primary?: boolean;
+    unique?: boolean;
+    foreign?: boolean;
+}
+
 interface ShellResult {
     exitCode: number;
     stdout: string;
@@ -145,11 +171,15 @@ export class McpAccessClient {
         }
     }
 
-    async listObjects(connection: AccessConnection, objectType: string): Promise<AccessObjectInfo[]> {
+    async listObjects(
+        connection: AccessConnection,
+        objectType: string,
+        timeoutOverrideMs?: number
+    ): Promise<AccessObjectInfo[]> {
         const payload = await this.callTool("list_objects", {
             db_path: connection.dbPath,
             object_type: objectType
-        });
+        }, timeoutOverrideMs);
 
         const raw = this.extractObjectArray(payload, objectType);
 
@@ -170,8 +200,8 @@ export class McpAccessClient {
         });
     }
 
-    async listRelationships(connection: AccessConnection): Promise<AccessObjectInfo[]> {
-        const payload = await this.callTool("list_relationships", { db_path: connection.dbPath });
+    async listRelationships(connection: AccessConnection, timeoutOverrideMs?: number): Promise<AccessObjectInfo[]> {
+        const payload = await this.callTool("list_relationships", { db_path: connection.dbPath }, timeoutOverrideMs);
         const relationships: AccessRelationship[] = Array.isArray(payload)
             ? payload
             : payload.relationships ?? [];
@@ -183,8 +213,8 @@ export class McpAccessClient {
         }));
     }
 
-    async listReferences(connection: AccessConnection): Promise<AccessObjectInfo[]> {
-        const payload = await this.callTool("list_references", { db_path: connection.dbPath });
+    async listReferences(connection: AccessConnection, timeoutOverrideMs?: number): Promise<AccessObjectInfo[]> {
+        const payload = await this.callTool("list_references", { db_path: connection.dbPath }, timeoutOverrideMs);
         const references: AccessReference[] = Array.isArray(payload) ? payload : payload.references ?? [];
 
         return references.map((reference) => ({
@@ -194,18 +224,77 @@ export class McpAccessClient {
         }));
     }
 
+    async listLinkedTables(connection: AccessConnection, timeoutOverrideMs?: number): Promise<AccessObjectInfo[]> {
+        const payload = await this.callTool("list_linked_tables", { db_path: connection.dbPath }, timeoutOverrideMs);
+        const linked: AccessLinkedTable[] = Array.isArray(payload)
+            ? payload
+            : payload.linked_tables ?? [];
+
+        return linked.map((item) => ({
+            name: String(item.name ?? "(sin nombre)"),
+            objectType: "linked_table",
+            metadata: item as unknown as Record<string, unknown>
+        }));
+    }
+
+    async listStartupOptions(connection: AccessConnection, timeoutOverrideMs?: number): Promise<AccessObjectInfo[]> {
+        const payload = await this.callTool("list_startup_options", { db_path: connection.dbPath }, timeoutOverrideMs);
+        const options: AccessStartupOption[] = Array.isArray(payload)
+            ? payload
+            : payload.options ?? [];
+
+        return options.map((item) => ({
+            name: String(item.name ?? "(sin nombre)"),
+            objectType: "startup_option",
+            metadata: {
+                name: item.name,
+                value: item.value,
+                source: item.source
+            }
+        }));
+    }
+
+    async getTableIndexes(
+        connection: AccessConnection,
+        tableName: string,
+        timeoutOverrideMs?: number
+    ): Promise<AccessIndexInfo[]> {
+        const payload = await this.callTool("list_indexes", {
+            db_path: connection.dbPath,
+            table_name: tableName
+        }, timeoutOverrideMs);
+
+        const indexes: AccessIndexInfo[] = Array.isArray(payload)
+            ? payload
+            : payload.indexes ?? [];
+
+        return indexes.map((idx) => ({
+            name: String(idx.name ?? "(sin nombre)"),
+            fields: Array.isArray(idx.fields)
+                ? idx.fields.map((field) => ({
+                    name: field.name ? String(field.name) : undefined,
+                    order: field.order ? String(field.order) : undefined
+                }))
+                : [],
+            primary: Boolean(idx.primary),
+            unique: Boolean(idx.unique),
+            foreign: Boolean(idx.foreign)
+        }));
+    }
+
     async getObjectDocument(
         connection: AccessConnection,
         categoryKey: AccessCategoryKey,
         objectName: string,
-        metadata?: Record<string, unknown>
+        metadata?: Record<string, unknown>,
+        timeoutOverrideMs?: number
     ): Promise<AccessObjectDocument> {
         if (categoryKey === "queries") {
             const payload = await this.callTool("manage_query", {
                 db_path: connection.dbPath,
                 action: "get_sql",
                 query_name: objectName
-            });
+            }, timeoutOverrideMs);
 
             const sql = this.extractSql(payload);
             return {
@@ -219,7 +308,7 @@ export class McpAccessClient {
             const payload = await this.callTool("table_info", {
                 db_path: connection.dbPath,
                 table_name: objectName
-            });
+            }, timeoutOverrideMs);
 
             return {
                 title: `${objectName}.table.json`,
@@ -239,7 +328,7 @@ export class McpAccessClient {
                 db_path: connection.dbPath,
                 object_type: objectType,
                 object_name: objectName
-            });
+            }, timeoutOverrideMs);
 
             const rawCode = this.extractCode(payload);
             const content = categoryKey === "forms" || categoryKey === "reports"
@@ -260,7 +349,7 @@ export class McpAccessClient {
                     db_path: connection.dbPath,
                     object_type: "macro",
                     object_name: objectName
-                });
+                }, timeoutOverrideMs);
 
                 return {
                     title: `${objectName}.macro.txt`,
@@ -346,12 +435,12 @@ export class McpAccessClient {
         throw (lastError instanceof Error ? lastError : new Error(finalMessage || "Error al cargar datos de tabla."));
     }
 
-    async getQuerySql(connection: AccessConnection, queryName: string): Promise<string> {
+    async getQuerySql(connection: AccessConnection, queryName: string, timeoutOverrideMs?: number): Promise<string> {
         const payload = await this.callTool("manage_query", {
             db_path: connection.dbPath,
             action: "get_sql",
             query_name: queryName
-        });
+        }, timeoutOverrideMs);
         return this.extractSql(payload);
     }
 
@@ -465,13 +554,14 @@ export class McpAccessClient {
     async getControls(
         connection: AccessConnection,
         objectType: "form" | "report",
-        objectName: string
+        objectName: string,
+        timeoutOverrideMs?: number
     ): Promise<AccessControlInfo[]> {
         const payload = await this.callTool("list_controls", {
             db_path: connection.dbPath,
             object_type: objectType,
             object_name: objectName
-        });
+        }, timeoutOverrideMs);
 
         const controls = Array.isArray(payload?.controls) ? payload.controls : [];
         return controls.map((ctrl: any) => ({
@@ -551,13 +641,14 @@ export class McpAccessClient {
     async getFormReportProperties(
         connection: AccessConnection,
         objectType: "form" | "report",
-        objectName: string
+        objectName: string,
+        timeoutOverrideMs?: number
     ): Promise<AccessPropertyInfo[]> {
         const payload = await this.callTool("get_code", {
             db_path: connection.dbPath,
             object_type: objectType,
             object_name: objectName
-        });
+        }, timeoutOverrideMs);
 
         return this.extractTopLevelProperties(this.extractCode(payload), objectType);
     }
@@ -664,7 +755,8 @@ export class McpAccessClient {
         connection: AccessConnection,
         objectType: "module" | "form" | "report",
         objectName: string,
-        code: string
+        code: string,
+        timeoutOverrideMs?: number
     ): Promise<void> {
         await this.suppressAccessAlerts(connection);
         try {
@@ -673,10 +765,40 @@ export class McpAccessClient {
                 object_type: objectType,
                 object_name: objectName,
                 code
-            });
+            }, timeoutOverrideMs);
         } finally {
             await this.restoreAccessAlerts(connection);
         }
+    }
+
+    /**
+     * Ejecuta código VBA arbitrario en Access vía eval_vba.
+     * Usado por BulkExportService para llamar subrutinas inyectadas.
+     */
+    async evalVba(
+        connection: AccessConnection,
+        code: string,
+        timeoutOverrideMs?: number
+    ): Promise<void> {
+        await this.callTool("eval_vba", {
+            db_path: connection.dbPath,
+            code
+        }, timeoutOverrideMs);
+    }
+
+    /**
+     * Elimina un módulo VBA del proyecto activo.
+     * Usado por BulkExportService para limpiar módulos temporales.
+     */
+    async deleteVbaModule(
+        connection: AccessConnection,
+        moduleName: string
+    ): Promise<void> {
+        await this.evalVba(
+            connection,
+            `Application.VBE.ActiveVBProject.VBComponents.Remove Application.VBE.ActiveVBProject.VBComponents("${moduleName}")`,
+            15000
+        );
     }
 
     private async connect(): Promise<void> {
@@ -735,17 +857,24 @@ export class McpAccessClient {
         }
 
         const script = [
-            "$roots = @( 'HKCU:\\Software\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations', 'HKCU:\\Software\\WOW6432Node\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations' )",
+            "$roots = @(",
+            "  'HKCU:\\Software\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations',",
+            "  'HKCU:\\Software\\WOW6432Node\\Microsoft\\Office\\16.0\\Access\\Security\\Trusted Locations'",
+            ")",
             "$snapshot = @()",
             "foreach ($root in $roots) {",
             "  $entry = [ordered]@{ Root = $root; Exists = (Test-Path -LiteralPath $root); RootProperties = [ordered]@{}; Locations = @() }",
             "  if ($entry.Exists) {",
             "    $rootProps = Get-ItemProperty -LiteralPath $root",
-            "    foreach ($p in $rootProps.PSObject.Properties) { if ($p.Name -notlike 'PS*') { $entry.RootProperties[$p.Name] = $p.Value } }",
+            "    foreach ($p in $rootProps.PSObject.Properties) {",
+            "      if ($p.Name -notlike 'PS*') { $entry.RootProperties[$p.Name] = $p.Value }",
+            "    }",
             "    foreach ($child in (Get-ChildItem -LiteralPath $root)) {",
             "      $loc = [ordered]@{ Key = $child.PSChildName }",
             "      $props = Get-ItemProperty -LiteralPath $child.PSPath",
-            "      foreach ($p in $props.PSObject.Properties) { if ($p.Name -notlike 'PS*') { $loc[$p.Name] = $p.Value } }",
+            "      foreach ($p in $props.PSObject.Properties) {",
+            "        if ($p.Name -notlike 'PS*') { $loc[$p.Name] = $p.Value }",
+            "      }",
             "      $entry.Locations += [pscustomobject]$loc",
             "    }",
             "  }",
