@@ -1,13 +1,9 @@
-﻿import * as cp from "node:child_process";
-import * as fs from "node:fs/promises";
+﻿import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { promisify } from "node:util";
 import { AccessConnection } from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
 import { BULK_EXPORT_VBA } from "../vba/bulkExportVba";
-
-const exec = promisify(cp.exec);
 
 const MODULE_NAME = "SecondBrainBulkExport";
 
@@ -22,14 +18,10 @@ function sanitizeForLoadFromText(code: string): string {
 }
 
 export class BulkExportService {
-    private readonly runnerDbPath: string;
-
     constructor(
         private readonly mcpClient: McpAccessClient,
-        globalStoragePath: string
-    ) {
-        this.runnerDbPath = path.join(globalStoragePath, "SecondBrainRunner.accdb");
-    }
+        _globalStoragePath: string
+    ) {}
 
     async runJsonExport(
         connection: AccessConnection,
@@ -37,14 +29,17 @@ export class BulkExportService {
         timeoutMs = RUN_TIMEOUT_MS
     ): Promise<Record<string, unknown>> {
         const tempPath = path.join(os.tmpdir(), `sb_bulk_${Date.now()}.json`);
-        const runnerConn = await this.ensureRunner();
+        const runnerDbPath = this.resolveRunnerPath(connection.dbPath);
 
+        await this.createAndInjectRunner(runnerDbPath);
+        const runnerConn: AccessConnection = { id: "runner", name: "SecondBrainRunner", dbPath: runnerDbPath };
         try {
-            await this.runOnRunner(runnerConn, "ExportToJsonFile", connection.dbPath, tempPath, mode, timeoutMs);
+            await this.runVba(runnerConn, "ExportToJsonFile", connection.dbPath, tempPath, mode, timeoutMs);
             const raw = await fs.readFile(tempPath, "utf-8");
             return JSON.parse(raw) as Record<string, unknown>;
         } finally {
             try { await fs.unlink(tempPath); } catch { /* ok */ }
+            await this.deleteRunner(runnerDbPath);
         }
     }
 
@@ -54,65 +49,50 @@ export class BulkExportService {
         mode: string,
         timeoutMs = RUN_TIMEOUT_MS
     ): Promise<void> {
-        const runnerConn = await this.ensureRunner();
-        await this.runOnRunner(runnerConn, "ExportToFiles", connection.dbPath, outputDir, mode, timeoutMs);
-    }
+        const runnerDbPath = this.resolveRunnerPath(connection.dbPath);
 
-    private async ensureRunner(): Promise<AccessConnection> {
-        const exists = await fs.access(this.runnerDbPath).then(() => true).catch(() => false);
-        if (!exists) {
-            await this.createRunnerDatabase();
-            await this.injectModuleIntoRunner();
+        await this.createAndInjectRunner(runnerDbPath);
+        const runnerConn: AccessConnection = { id: "runner", name: "SecondBrainRunner", dbPath: runnerDbPath };
+        try {
+            await this.runVba(runnerConn, "ExportToFiles", connection.dbPath, outputDir, mode, timeoutMs);
+        } finally {
+            await this.deleteRunner(runnerDbPath);
         }
-        return { id: "runner", name: "SecondBrainRunner", dbPath: this.runnerDbPath };
     }
 
-    private async createRunnerDatabase(): Promise<void> {
-        await fs.mkdir(path.dirname(this.runnerDbPath), { recursive: true });
-        const escapedPath = this.runnerDbPath.replace(/'/g, "''");
-        const script = [
-            `$app = New-Object -ComObject Access.Application`,
-            `$app.Visible = $false`,
-            `try { $app.NewCurrentDatabase('${escapedPath}') } finally { $app.Quit() }`,
-        ].join("; ");
-        await exec(`powershell.exe -NoProfile -NonInteractive -Command "${script}"`, { timeout: 30_000 });
+    private resolveRunnerPath(targetDbPath: string): string {
+        const dir = path.dirname(targetDbPath);
+        const base = path.basename(targetDbPath, path.extname(targetDbPath));
+        return path.join(dir, `${base}_Runner.accdb`);
     }
 
-    private async injectModuleIntoRunner(): Promise<void> {
-        const runnerConn: AccessConnection = { id: "runner", name: "SecondBrainRunner", dbPath: this.runnerDbPath };
+    private async createAndInjectRunner(runnerDbPath: string): Promise<void> {
+        await fs.rm(runnerDbPath, { force: true });
+        await this.mcpClient.createDatabase(runnerDbPath);
+        const runnerConn: AccessConnection = { id: "runner", name: "SecondBrainRunner", dbPath: runnerDbPath };
         await this.mcpClient.setCode(runnerConn, "module", MODULE_NAME, sanitizeForLoadFromText(BULK_EXPORT_VBA), INJECT_TIMEOUT_MS);
         await this.mcpClient.compileModule(runnerConn, MODULE_NAME, INJECT_TIMEOUT_MS);
     }
 
-    private async runOnRunner(
+    private async deleteRunner(runnerDbPath: string): Promise<void> {
+        try { await this.mcpClient.closeAccess(); } catch { /* ok */ }
+        try { await fs.rm(runnerDbPath, { force: true }); } catch { /* ok */ }
+    }
+
+    private async runVba(
         runnerConn: AccessConnection,
         subName: string,
         targetDbPath: string,
         outputPath: string,
         mode: string,
         timeoutMs: number,
-        retry = true
     ): Promise<void> {
         const qualifiedProcedure = `${MODULE_NAME}.${subName}`;
         const args = [targetDbPath, outputPath, mode];
-
         try {
             await this.mcpClient.runVba(runnerConn, qualifiedProcedure, args, timeoutMs);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            const missingProcedure =
-                /no\s+encuentra\s+el\s+procedimiento/i.test(message) ||
-                /can('|')t\s+find\s+procedure/i.test(message) ||
-                /could\s+not\s+find\s+the\s+procedure/i.test(message);
-
-            if (missingProcedure && retry) {
-                try { await fs.unlink(this.runnerDbPath); } catch { /* ok */ }
-                await this.createRunnerDatabase();
-                await this.injectModuleIntoRunner();
-                await this.runOnRunner(runnerConn, subName, targetDbPath, outputPath, mode, timeoutMs, false);
-                return;
-            }
-
             throw new Error(`Exportacion VBA fallo (${message}). Usando metodo secuencial...`);
         }
     }

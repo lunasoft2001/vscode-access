@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { AccessCategoryKey, AccessConnection, AccessObjectInfo } from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
-import { BulkExportService } from "./bulkExportService";
 
 export type SecondBrainScope =
     | { mode: "full" }
@@ -61,11 +60,7 @@ export class SecondBrainService {
     private static readonly UI_TIMEOUT_MS = 240000;
     private static readonly QUERY_TIMEOUT_MS = 15000;
 
-    private readonly bulkExportService: BulkExportService;
-
-    constructor(private readonly mcpClient: McpAccessClient, globalStoragePath: string) {
-        this.bulkExportService = new BulkExportService(mcpClient, globalStoragePath);
-    }
+    constructor(private readonly mcpClient: McpAccessClient, _globalStoragePath: string) {}
 
     async exportSecondBrain(
         connection: AccessConnection,
@@ -114,29 +109,7 @@ export class SecondBrainService {
         scope: SecondBrainScope,
         options?: SecondBrainExportOptions
     ): Promise<SecondBrainMetadata> {
-        // Single object: no hay ventaja de bulk, usar método secuencial directo
-        if (scope.mode === "object") {
-            return this.buildMetadataSequential(connection, scope, options);
-        }
-
-        const bulkMode = scope.mode === "full" ? "full" : scope.categoryKey;
-
-        await this.reportProgress(options, {
-            phase: "inventory",
-            message: "Ejecutando exportacion masiva VBA (una sola llamada COM)..."
-        });
-
-        try {
-            const raw = await this.bulkExportService.runJsonExport(connection, bulkMode);
-            return this.rawToMetadata(raw, connection);
-        } catch (bulkError) {
-            const errMsg = bulkError instanceof Error ? bulkError.message : String(bulkError);
-            await this.reportProgress(options, {
-                phase: "inventory",
-                message: `Exportacion VBA fallo (${errMsg}). Usando metodo secuencial...`
-            });
-            return this.buildMetadataSequential(connection, scope, options);
-        }
+        return this.buildMetadataSequential(connection, scope, options);
     }
 
     /** Convierte el JSON plano del VBA al tipo SecondBrainMetadata */

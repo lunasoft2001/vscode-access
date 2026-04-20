@@ -842,6 +842,14 @@ export class McpAccessClient {
      * Usa DoCmd.DeleteObject (COM directo) en lugar de eval_vba/VBE, por lo que
      * funciona incluso cuando el proyecto VBA tiene errores de compilación.
      */
+    async createDatabase(dbPath: string, timeoutOverrideMs?: number): Promise<void> {
+        await this.callTool("create_database", { db_path: dbPath }, timeoutOverrideMs ?? 30_000);
+    }
+
+    async closeAccess(timeoutOverrideMs?: number): Promise<void> {
+        await this.callTool("access_close", {}, timeoutOverrideMs ?? 10_000);
+    }
+
     async deleteVbaModule(
         connection: AccessConnection,
         moduleName: string,
