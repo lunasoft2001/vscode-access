@@ -575,7 +575,8 @@ export class SecondBrainService {
             "_index",
             "_overview",
             "_health",
-            "_dependencies"
+            "_dependencies",
+            "_guide"
         ]);
 
         const noteDrafts = new Map<string, NoteDraft>();
@@ -921,6 +922,8 @@ export class SecondBrainService {
             "",
             "- [[_overview]]",
             "- [[_health]]",
+            "- [[_dependencies]]",
+            "- [[_guide]]",
             ""
         ].join("\n");
 
@@ -1049,10 +1052,110 @@ export class SecondBrainService {
         }
         depsLines.push("");
 
-        registerNote("_index", indexContent.split("\n"), ["_overview", "_health", "_dependencies"]);
-        registerNote("_overview", overviewContent.split("\n"), ["_index", "_health", "_dependencies", ...mocGroups.keys()]);
+        const guideContent = [
+            "# Guía de uso del Second Brain",
+            "",
+            `> Generado automáticamente desde: **${metadata.database}**  `,
+            `> Fecha: ${metadata.generated}`,
+            "",
+            "---",
+            "",
+            "## Qué es este vault",
+            "",
+            "Este vault Obsidian contiene un mapa completo de la base de datos Access:",
+            "tablas, consultas, formularios, informes, módulos VBA, relaciones y dependencias.",
+            "Cada objeto es una nota con sus metadatos, vínculos y backlinks automáticos.",
+            "",
+            "---",
+            "",
+            "## Cómo abrirlo en Obsidian",
+            "",
+            "1. Abre Obsidian → **Abrir carpeta como vault**",
+            "2. Selecciona la carpeta raíz de este export",
+            "3. Confía en el vault cuando lo pida",
+            "4. Empieza desde [[_index]] o usa **Graph View** para ver el grafo de dependencias",
+            "",
+            "### Notas clave",
+            "",
+            "| Nota | Descripción |",
+            "|---|---|",
+            `| ${wiki("_index")} | Punto de entrada con estadísticas generales |`,
+            `| ${wiki("_overview")} | Resumen, MOCs y referencias VBA |`,
+            `| ${wiki("_health")} | Checks de calidad: formularios sin fuente, tablas huérfanas… |`,
+            `| ${wiki("_dependencies")} | Mapa cruzado: formularios→tablas, consultas→tablas |`,
+            "",
+            "### Carpetas",
+            "",
+            "| Carpeta | Contenido |",
+            "|---|---|",
+            "| `tables/` | Una nota por tabla con columnas, PKs, FKs e índices |",
+            "| `queries/` | Una nota por consulta con SQL y dependencias |",
+            "| `forms/` | Una nota por formulario con controles, props y código VBA |",
+            "| `reports/` | Una nota por informe con controles y código VBA |",
+            "| `modules/` | Una nota por módulo con índice de procedimientos y código |",
+            "| `macros/` | Una nota por macro con sus acciones |",
+            "| `relationships/` | Una nota por relación entre tablas |",
+            "| `linked-tables/` | Tablas vinculadas con su origen ODBC o MDB |",
+            "| `mocs/` | Mapas de conocimiento agrupados por dominio (high density) |",
+            "| `startup/` | Opciones de inicio de la aplicación |",
+            "",
+            "---",
+            "",
+            "## Cómo usarlo con IA (Claude, ChatGPT, Copilot…)",
+            "",
+            "### Opción A — Pegar el contenido directamente",
+            "",
+            "1. Abre la nota relevante (por ejemplo `tables/MiTabla.md`)",
+            "2. Copia su contenido completo",
+            "3. Pégalo en tu conversación con la IA junto con tu pregunta",
+            "",
+            "### Opción B — Exportar el vault completo como contexto",
+            "",
+            "Si tu herramienta de IA soporta subida de archivos o carpetas:",
+            "",
+            "1. Comprime la carpeta `db-second-brain/` en un ZIP",
+            "2. Súbelo como contexto a la sesión",
+            "3. Pide análisis completos: *\"¿Qué formularios usan la tabla X?\"*,",
+            "   *\"Explica el flujo de datos de este módulo\"*, *\"¿Hay tablas sin relaciones?\"*",
+            "",
+            "### Prompts de ejemplo",
+            "",
+            "```",
+            "Analiza el siguiente Second Brain de una base de datos Access.",
+            "Identifica las dependencias críticas y posibles problemas de diseño.",
+            "```",
+            "",
+            "```",
+            "Basándote en la nota _dependencies.md, ¿qué tablas son más críticas?",
+            "¿Qué pasaría si elimino la tabla X?",
+            "```",
+            "",
+            "```",
+            "Lee el módulo Y y explica qué hace cada procedimiento.",
+            "Genera documentación en español para cada función.",
+            "```",
+            "",
+            "```",
+            "Revisa _health.md y propón soluciones para cada issue encontrado.",
+            "```",
+            "",
+            "---",
+            "",
+            "## Tips para Obsidian",
+            "",
+            "- Usa **Ctrl+G** para abrir el Graph View y navegar visualmente",
+            "- Usa **Ctrl+P** → *Switcher* para buscar cualquier nota por nombre",
+            "- Filtra el grafo por carpeta (p.ej. solo `tables/`) para ver un sub-grafo",
+            "- Instala el plugin **Dataview** para hacer queries SQL sobre las notas",
+            "- Con Dataview puedes listar todos los formularios que usan una tabla",
+            ""
+        ].join("\n");
+
+        registerNote("_index", indexContent.split("\n"), ["_overview", "_health", "_dependencies", "_guide"]);
+        registerNote("_overview", overviewContent.split("\n"), ["_index", "_health", "_dependencies", "_guide", ...mocGroups.keys()]);
         registerNote("_health", healthContent.split("\n"), ["_index", "_overview"]);
         registerNote("_dependencies", depsLines, depsOutgoing);
+        registerNote("_guide", guideContent.split("\n"), ["_index", "_overview", "_health", "_dependencies"]);
 
         const incomingByTarget = new Map<string, Set<string>>();
         for (const [sourcePath, draft] of noteDrafts.entries()) {
