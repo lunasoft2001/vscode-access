@@ -301,7 +301,7 @@ export class SecondBrainService {
                 metadata.columns.push({
                     table_schema: "dbo",
                     table_name: objectName,
-                    column_name: field?.name,
+                    column_name: fixEncoding(field?.name),
                     data_type: field?.type,
                     is_nullable: field?.required ? "NO" : "YES",
                     character_maximum_length: field?.size,
@@ -336,7 +336,7 @@ export class SecondBrainService {
         if (categoryKey === "queries") {
             let sql = "";
             try {
-                sql = await this.mcpClient.getQuerySql(connection, objectName, SecondBrainService.QUERY_TIMEOUT_MS);
+                sql = fixEncoding(await this.mcpClient.getQuerySql(connection, objectName, SecondBrainService.QUERY_TIMEOUT_MS)) ?? "";
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 metadata.warnings.push(`SQL no disponible para query:${objectName} -> ${message}`);
@@ -364,7 +364,7 @@ export class SecondBrainService {
                 objectName,
                 SecondBrainService.UI_TIMEOUT_MS
             );
-            const recordSource = properties.find((item) => item.name.toLowerCase() === "recordsource")?.value ?? "";
+            const recordSource = fixEncoding(properties.find((item) => item.name.toLowerCase() === "recordsource")?.value ?? "") ?? "";
             const doc = await this.mcpClient.getObjectDocument(
                 connection,
                 categoryKey,
@@ -380,9 +380,10 @@ export class SecondBrainService {
                     name: ctrl.name,
                     control_type: ctrl.type_name,
                     control_source: ctrl.control_source,
-                    caption: ctrl.caption
+                    caption: fixEncoding(ctrl.caption)
                 })),
-                code: doc.content
+                code: doc.content,
+                procedures: extractVbaProcedures(doc.content)
             };
 
             if (categoryKey === "forms") {
@@ -419,7 +420,8 @@ export class SecondBrainService {
             metadata.modules.push({
                 name: objectName,
                 kind: "standard",
-                code: doc.content
+                code: doc.content,
+                procedures: extractVbaProcedures(doc.content)
             });
         }
     }
@@ -703,6 +705,9 @@ export class SecondBrainService {
             const name = String(form.name ?? "");
             const formNotePath = `forms/${sanitize(name)}`;
             const outgoing = this.collectUiDependencies(form, tableTargets, queryTargets);
+            for (const link of extractVbaObjectLinks(
+                String(form.code ?? ""), formTargets, reportTargets, queryTargets, macroTargets, tableTargets, moduleTargets
+            )) { outgoing.add(link); }
             const mocPath = mocByNotePath.get(formNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
@@ -714,6 +719,9 @@ export class SecondBrainService {
             const name = String(report.name ?? "");
             const reportNotePath = `reports/${sanitize(name)}`;
             const outgoing = this.collectUiDependencies(report, tableTargets, queryTargets);
+            for (const link of extractVbaObjectLinks(
+                String(report.code ?? ""), formTargets, reportTargets, queryTargets, macroTargets, tableTargets, moduleTargets
+            )) { outgoing.add(link); }
             const mocPath = mocByNotePath.get(reportNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
@@ -728,7 +736,9 @@ export class SecondBrainService {
                 formTargets,
                 reportTargets,
                 queryTargets,
-                macroTargets
+                macroTargets,
+                tableTargets,
+                moduleTargets
             );
             const macroNotePath = `macros/${sanitize(name)}`;
             const mocPath = mocByNotePath.get(macroNotePath);
@@ -753,15 +763,33 @@ export class SecondBrainService {
                 formTargets,
                 reportTargets,
                 queryTargets,
-                macroTargets
+                macroTargets,
+                tableTargets,
+                moduleTargets
             );
             const moduleNotePath = `modules/${sanitize(name)}`;
             const mocPath = mocByNotePath.get(moduleNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
             }
+            const procs = Array.isArray(module.procedures)
+                ? (module.procedures as Array<{ kind: string; name: string; visibility: string }>)
+                : [];
+            const procSection = procs.length > 0
+                ? [
+                    `## Procedures (${procs.length})`,
+                    "",
+                    "| Kind | Name | Visibility |",
+                    "|---|---|---|",
+                    ...procs.map((p) => `| ${p.kind} | ${p.name} | ${p.visibility} |`),
+                    ""
+                ]
+                : [];
             const content = [
                 `# Module: ${name}`,
+                "",
+                ...procSection,
+                "## Code",
                 "",
                 "```vb",
                 String(module.code ?? ""),
@@ -910,13 +938,30 @@ export class SecondBrainService {
 
     private buildUiNote(kind: "Form" | "Report", item: Record<string, unknown>, dependencies: Set<string>): string {
         const controls = Array.isArray(item.controls) ? item.controls : [];
+        const procs = Array.isArray(item.procedures)
+            ? (item.procedures as Array<{ kind: string; name: string; visibility: string }>)
+            : [];
         const sortedDependencies = Array.from(dependencies).sort();
         const header = [
             `# ${kind}: ${item.name ?? ""}`,
             "",
             `- RecordSource: ${item.record_source ?? ""}`,
             `- Controls: ${controls.length}`,
-            "",
+            ""
+        ];
+
+        if (procs.length > 0) {
+            header.push(
+                `## Procedures (${procs.length})`,
+                "",
+                "| Kind | Name | Visibility |",
+                "|---|---|---|",
+                ...procs.map((p) => `| ${p.kind} | ${p.name} | ${p.visibility} |`),
+                ""
+            );
+        }
+
+        header.push(
             "## Depends On",
             "",
             ...(sortedDependencies.length > 0 ? sortedDependencies.map((target) => `- ${wiki(target)}`) : ["- None"]),
@@ -924,8 +969,8 @@ export class SecondBrainService {
             "## Controls",
             "",
             "| Name | Type | Source | Caption |",
-            "|---|---|---|---|"
-        ];
+            "|---|---|---|"
+        );
 
         for (const control of controls as Array<Record<string, unknown>>) {
             header.push(
@@ -1069,6 +1114,22 @@ function sanitize(value: string): string {
     return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
 }
 
+/** Repara doble encoding UTF-8 (latin1 interpretado como UTF-8). Ej: "Â·" -> "·" */
+function fixEncoding(text: string | undefined): string | undefined {
+    if (!text) { return text; }
+    // Solo aplicar si hay patrón de doble encoding UTF-8 (mojibake):
+    // caracteres 0xC0-0xFF seguidos de 0x80-0xBF
+    if (!/[\xC0-\xFF][\x80-\xBF]/.test(text)) { return text; }
+    try {
+        const bytes = Uint8Array.from(text, (c) => c.charCodeAt(0) & 0xff);
+        const fixed = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+        // Solo usar si no introdujo caracteres de reemplazo
+        return fixed.includes("\uFFFD") ? text : fixed;
+    } catch {
+        return text;
+    }
+}
+
 function wiki(target: string): string {
     return `[[${target}]]`;
 }
@@ -1130,15 +1191,26 @@ function extractVbaObjectLinks(
     formTargets: Map<string, string>,
     reportTargets: Map<string, string>,
     queryTargets: Map<string, string>,
-    macroTargets: Map<string, string>
+    macroTargets: Map<string, string>,
+    tableTargets?: Map<string, string>,
+    moduleTargets?: Map<string, string>
 ): Set<string> {
     const links = new Set<string>();
     const patterns: Array<{ regex: RegExp; map: Map<string, string> }> = [
         { regex: /OpenForm\s*\(?\s*"([^"]+)"/gi, map: formTargets },
+        { regex: /\bForms\s*[!(]\s*"?([A-Za-z_][A-Za-z0-9_\s]*)"?[!)]/gi, map: formTargets },
         { regex: /OpenReport\s*\(?\s*"([^"]+)"/gi, map: reportTargets },
         { regex: /OpenQuery\s*\(?\s*"([^"]+)"/gi, map: queryTargets },
         { regex: /QueryDefs\s*\(\s*"([^"]+)"/gi, map: queryTargets },
-        { regex: /RunMacro\s*\(?\s*"([^"]+)"/gi, map: macroTargets }
+        { regex: /RunMacro\s*\(?\s*"([^"]+)"/gi, map: macroTargets },
+        ...(tableTargets ? [
+            { regex: /\bD(?:Lookup|Count|Sum|Avg|Max|Min|First|Last)\s*\([^,]+,\s*"([^"]+)"/gi, map: tableTargets },
+            { regex: /\bOpenRecordset\s*\(\s*"([^"]+)"/gi, map: tableTargets },
+            { regex: /\bTableDefs\s*\(\s*"([^"]+)"/gi, map: tableTargets }
+        ] : []),
+        ...(moduleTargets ? [
+            { regex: /\b([A-Za-z_][A-Za-z0-9_]+)\s*\.\s*[A-Za-z_]/gi, map: moduleTargets }
+        ] : [])
     ];
 
     for (const pattern of patterns) {
@@ -1152,6 +1224,20 @@ function extractVbaObjectLinks(
     }
 
     return links;
+}
+
+function extractVbaProcedures(code: string): Array<{ kind: string; name: string; visibility: string }> {
+    const procedures: Array<{ kind: string; name: string; visibility: string }> = [];
+    const regex = /^[ \t]*(?:(Public|Private|Friend)\s+)?(?:Static\s+)?(?:(Function|Sub)|(Property\s+(?:Get|Let|Set)))\s+(\w+)/gim;
+    for (const match of code.matchAll(regex)) {
+        const visibility = match[1] ?? "Public";
+        const kind = match[2] ?? (match[3] ?? "").trim();
+        const name = match[4];
+        if (name && kind) {
+            procedures.push({ kind, name, visibility });
+        }
+    }
+    return procedures;
 }
 
 function inferDomainKey(name: string): string {
