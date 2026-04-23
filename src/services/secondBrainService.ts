@@ -382,12 +382,17 @@ export class SecondBrainService {
                     break;
                 }
 
-                if (isLikelyTimeoutError(message) && !this.timeoutDegradedMode) {
-                    this.timeoutDegradedMode = true;
-                    await this.reportProgress(options, {
-                        phase: "inventory",
-                        message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`
-                    });
+                if (isLikelyTimeoutError(message)) {
+                    if (!this.timeoutDegradedMode) {
+                        this.timeoutDegradedMode = true;
+                        await this.reportProgress(options, {
+                            phase: "inventory",
+                            message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`
+                        });
+                    }
+                    // Reconectar siempre tras un timeout que llega aqui: runWithTimeoutRetry
+                    // ya reintento y fallo, el servidor MCP puede estar en mal estado.
+                    await this.recoverAfterTimeout(options, `${categoryKey}:${objectInfo.name}:post-retry-timeout`, metadata);
                 }
             }
         }
