@@ -11,6 +11,12 @@ All notable changes to this project are documented in this file.
 - VBA entry points now accept `targetDbPath` as first argument and call `Application.OpenCurrentDatabase` to switch context before exporting.
 
 ## 1.0.18 - 2026-04-20
+## 1.0.21 - 2026-04-23
+- SecondBrain: cierre automático de Microsoft Access cuando se detecta el error "base de datos ya está abierta" — se ejecuta `taskkill`, se espera 3 s, se reconecta el MCP y se reintenta el objeto automáticamente.
+- SecondBrain: aborto anticipado de una categoría tras 5 fallos consecutivos para evitar colas de 60 s por objeto cuando el servidor MCP queda en mal estado.
+- SecondBrain: reconexión MCP garantizada tras cualquier timeout que agote los reintentos, evitando que la fase siguiente (relaciones, etc.) falle en cascada.
+- SecondBrain: módulos VBA usan ahora `runWithTimeoutRetry` + modo degradado, igual que formularios, informes y consultas.
+
 ## 1.0.20 - 2026-04-23
 - Hardened MCP-Access setup on Windows by preinstalling `cryptography` with `--only-binary :all:` to avoid source builds that require Rust/MSVC toolchains.
 - SecondBrain: retry automático por timeout con reconexión MCP antes de continuar; modo timeout agresivo (máx. 15 s por llamada) que se activa tras el primer fallo para evitar ciclos de espera largos.
