@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { AccessCategoryKey, AccessConnection, AccessControlInfo, AccessObjectInfo, AccessPropertyInfo } from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
+import { isAccessDatabaseOpenError, restartAccessProcesses } from "../utils/accessRecovery";
 
 export type SecondBrainScope =
     | { mode: "full" }
@@ -294,6 +295,7 @@ export class SecondBrainService {
         let consecutiveFailures = 0;
         let lastFailureMessage = "";
         const MAX_CONSECUTIVE_FAILURES = 5;
+        let accessRestartedForCategory = false;
 
         for (const objectInfo of objects) {
             completed += 1;
@@ -314,6 +316,7 @@ export class SecondBrainService {
                 objectStartedAt
             );
 
+            let objectError: Error | undefined;
             try {
                 await this.collectSingleObject(connection, metadata, categoryKey, objectInfo, options);
                 const objectDurationMs = Date.now() - objectStartedAt;
@@ -324,8 +327,43 @@ export class SecondBrainService {
                         message: `${categoryKey}: ${objectInfo.name} completado en ${formatDuration(objectDurationMs)} (${completed}/${total})`
                     });
                 }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
+            } catch (firstError) {
+                const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+
+                // Si Access está abierto y aún no hemos reiniciado en esta categoría,
+                // cerramos Access, reconectamos el MCP y reintentamos el objeto.
+                if (isAccessDatabaseOpenError(firstMessage) && !accessRestartedForCategory) {
+                    accessRestartedForCategory = true;
+                    await this.reportProgress(options, {
+                        phase: "inventory",
+                        message: `Access está abierto. Cerrándolo y reintentando ${categoryKey}:${objectInfo.name}...`
+                    });
+                    try {
+                        await restartAccessProcesses();
+                        // Esperar a que Access termine de cerrar antes de reconectar.
+                        await new Promise<void>(resolve => setTimeout(resolve, 3000));
+                        await this.recoverAfterTimeout(options, `${categoryKey}:access-restart`, metadata);
+                        // Reintentar el objeto actual.
+                        await this.collectSingleObject(connection, metadata, categoryKey, objectInfo, options);
+                        consecutiveFailures = 0;
+                        await this.reportProgress(options, {
+                            phase: "inventory",
+                            message: `${categoryKey}: ${objectInfo.name} exportado correctamente tras reiniciar Access.`
+                        });
+                        stopSlowObjectWarnings();
+                        continue;
+                    } catch (retryError) {
+                        objectError = retryError instanceof Error ? retryError : new Error(String(retryError));
+                    }
+                } else {
+                    objectError = firstError instanceof Error ? firstError : new Error(firstMessage);
+                }
+            } finally {
+                stopSlowObjectWarnings();
+            }
+
+            if (objectError) {
+                const message = objectError.message;
                 metadata.warnings.push(`No se pudo exportar ${categoryKey}:${objectInfo.name} -> ${message}`);
                 await this.reportProgress(options, {
                     phase: "inventory",
@@ -351,8 +389,6 @@ export class SecondBrainService {
                         message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`
                     });
                 }
-            } finally {
-                stopSlowObjectWarnings();
             }
         }
 
