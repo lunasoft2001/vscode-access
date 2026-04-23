@@ -291,6 +291,10 @@ export class SecondBrainService {
         const globalOffset = this._globalProgressOffset;
         const useGlobal = this._globalProgressTotal > 0;
         let completed = 0;
+        let consecutiveFailures = 0;
+        let lastFailureMessage = "";
+        const MAX_CONSECUTIVE_FAILURES = 5;
+
         for (const objectInfo of objects) {
             completed += 1;
             const objectStartedAt = Date.now();
@@ -313,6 +317,7 @@ export class SecondBrainService {
             try {
                 await this.collectSingleObject(connection, metadata, categoryKey, objectInfo, options);
                 const objectDurationMs = Date.now() - objectStartedAt;
+                consecutiveFailures = 0;
                 if (objectDurationMs >= SecondBrainService.SLOW_OBJECT_WARNING_MS) {
                     await this.reportProgress(options, {
                         phase: "inventory",
@@ -326,6 +331,26 @@ export class SecondBrainService {
                     phase: "inventory",
                     message: `${categoryKey}: ${objectInfo.name} fallo tras ${formatDuration(Date.now() - objectStartedAt)} -> ${message}`
                 });
+
+                consecutiveFailures += 1;
+                lastFailureMessage = message;
+
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                    const remaining = total - completed;
+                    const summary = `${categoryKey}: abortando ${remaining} objetos restantes tras ${MAX_CONSECUTIVE_FAILURES} fallos consecutivos -> ${lastFailureMessage}`;
+                    metadata.warnings.push(summary);
+                    await this.reportProgress(options, { phase: "inventory", message: summary });
+                    await this.recoverAfterTimeout(options, `${categoryKey}:aborto-por-fallos-consecutivos`, metadata);
+                    break;
+                }
+
+                if (isLikelyTimeoutError(message) && !this.timeoutDegradedMode) {
+                    this.timeoutDegradedMode = true;
+                    await this.reportProgress(options, {
+                        phase: "inventory",
+                        message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`
+                    });
+                }
             } finally {
                 stopSlowObjectWarnings();
             }
@@ -642,12 +667,17 @@ export class SecondBrainService {
         }
 
         if (categoryKey === "modules") {
-            const doc = await this.mcpClient.getObjectDocument(
-                connection,
-                "modules",
-                objectName,
-                objectInfo.metadata,
-                SecondBrainService.OBJECT_TIMEOUT_MS
+            const doc = await this.runWithTimeoutRetry(
+                options,
+                metadata,
+                `modules:${objectName}`,
+                async () => this.mcpClient.getObjectDocument(
+                    connection,
+                    "modules",
+                    objectName,
+                    objectInfo.metadata,
+                    this.resolveTimeout(SecondBrainService.OBJECT_TIMEOUT_MS)
+                )
             );
             metadata.modules.push({
                 name: objectName,
