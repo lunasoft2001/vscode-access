@@ -469,6 +469,30 @@ export function activate(context: vscode.ExtensionContext): void {
         return folder?.[0]?.fsPath;
     }
 
+    async function pickSecondBrainOutputFolder(
+        title: string,
+        connection: import("./models/types").AccessConnection
+    ): Promise<string | undefined> {
+        const memoryKey = `secondBrain.outputDir.${connection.id}`;
+        const remembered = context.globalState.get<string>(memoryKey);
+        const defaultPath = remembered ?? path.join(path.dirname(connection.dbPath), "secondBrain");
+
+        const folder = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            title,
+            defaultUri: vscode.Uri.file(defaultPath),
+            openLabel: "Seleccionar carpeta"
+        });
+
+        const selected = folder?.[0]?.fsPath;
+        if (selected) {
+            await context.globalState.update(memoryKey, selected);
+        }
+        return selected;
+    }
+
     async function pickSecondBrainLinkDensity(): Promise<"standard" | "high" | undefined> {
         const pick = await vscode.window.showQuickPick(
             [
@@ -505,6 +529,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
         const executeOnce = async (): Promise<import("./services/secondBrainService").SecondBrainExportResult> => {
             let lastPercent = 0;
+            let lastLoggedObjectKey = "";
+            let lastUiMessage = "";
 
             await mcpClient.reconnect();
             secondBrainOutput.appendLine("[inventory] MCP reconectado para iniciar exportación.");
@@ -519,18 +545,39 @@ export function activate(context: vscode.ExtensionContext): void {
                     return await runner({
                         onProgress: async (event) => {
                             const prefix = `[${event.phase}]`;
-                            secondBrainOutput.appendLine(`${prefix} ${event.message}`);
-                            secondBrainStatusBar.text = `$(sync~spin) SecondBrain: ${event.message}`;
+                            const shouldLogObjectProgress = event.phase !== "object"
+                                || typeof event.completed !== "number"
+                                || typeof event.total !== "number"
+                                || event.completed === event.total
+                                || event.completed === 1
+                                || event.completed % 25 === 0
+                                || Math.floor((event.completed / Math.max(event.total, 1)) * 100) !== lastPercent;
+
+                            if (shouldLogObjectProgress) {
+                                const objectKey = `${event.phase}:${event.message}:${event.completed ?? ""}/${event.total ?? ""}`;
+                                if (objectKey !== lastLoggedObjectKey) {
+                                    secondBrainOutput.appendLine(`${prefix} ${event.message}`);
+                                    lastLoggedObjectKey = objectKey;
+                                }
+                            }
+
+                            const statusMessage = `$(sync~spin) SecondBrain: ${event.message}`;
+                            if (statusMessage !== lastUiMessage) {
+                                secondBrainStatusBar.text = statusMessage;
+                                lastUiMessage = statusMessage;
+                            }
 
                             if (typeof event.completed === "number" && typeof event.total === "number" && event.total > 0) {
                                 const percent = Math.min(100, Math.max(0, Math.floor((event.completed / event.total) * 100)));
                                 const increment = Math.max(0, percent - lastPercent);
                                 lastPercent = percent;
-                                progress.report({ increment, message: event.message });
+                                progress.report({ increment, message: shouldLogObjectProgress ? event.message : `${event.completed}/${event.total}` });
                                 return;
                             }
 
-                            progress.report({ message: event.message });
+                            if (event.message !== lastUiMessage.replace("$(sync~spin) SecondBrain: ", "")) {
+                                progress.report({ message: event.message });
+                            }
                         }
                     });
                 }
@@ -837,7 +884,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const outputDir = await pickOutputFolder("Seleccionar carpeta de salida para SecondBrain completo");
+            const outputDir = await pickSecondBrainOutputFolder("Seleccionar carpeta de salida para SecondBrain completo", connection);
             if (!outputDir) {
                 return;
             }
@@ -906,7 +953,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const outputDir = await pickOutputFolder(`Seleccionar carpeta de salida para ${categoryKey}`);
+            const outputDir = await pickSecondBrainOutputFolder(`Seleccionar carpeta de salida para ${categoryKey}`, connection);
             if (!outputDir) {
                 return;
             }
@@ -953,7 +1000,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const outputDir = await pickOutputFolder(`Seleccionar carpeta de salida para ${node.objectInfo.name}`);
+            const outputDir = await pickSecondBrainOutputFolder(`Seleccionar carpeta de salida para ${node.objectInfo.name}`, node.connection);
             if (!outputDir) {
                 return;
             }

@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { AccessCategoryKey, AccessConnection, AccessObjectInfo } from "../models/types";
+import { AccessCategoryKey, AccessConnection, AccessControlInfo, AccessObjectInfo, AccessPropertyInfo } from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
 
 export type SecondBrainScope =
@@ -50,7 +50,6 @@ export interface SecondBrainExportOptions {
 
 interface NoteDraft {
     notePath: string;
-    lines: string[];
     outgoing: Set<string>;
 }
 
@@ -58,7 +57,16 @@ export class SecondBrainService {
     private static readonly INVENTORY_TIMEOUT_MS = 300000;
     private static readonly OBJECT_TIMEOUT_MS = 180000;
     private static readonly UI_TIMEOUT_MS = 240000;
+    private static readonly UI_CONTROLS_TIMEOUT_MS = 20000;
     private static readonly QUERY_TIMEOUT_MS = 15000;
+    private static readonly DEGRADED_TIMEOUT_MS = 15000;
+    private static readonly MCP_TIMEOUT_RETRIES = 1;
+    private static readonly SLOW_OBJECT_WARNING_MS = 10000;
+    private static readonly SLOW_OBJECT_REPEAT_MS = 15000;
+
+    private timeoutDegradedMode = false;
+    private _globalProgressTotal = 0;
+    private _globalProgressOffset = 0;
 
     constructor(private readonly mcpClient: McpAccessClient, _globalStoragePath: string) {}
 
@@ -68,6 +76,7 @@ export class SecondBrainService {
         scope: SecondBrainScope,
         options?: SecondBrainExportOptions
     ): Promise<SecondBrainExportResult> {
+        const exportStartedAt = Date.now();
         const timestamp = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
         const scopeLabel = this.scopeLabel(scope);
         const rootDir = path.join(baseOutputDir, `secondbrain-${sanitize(connection.name)}-${scopeLabel}-${timestamp}`);
@@ -80,20 +89,33 @@ export class SecondBrainService {
             message: `Preparando exportacion en ${rootDir}`
         });
 
+        const metadataStartedAt = Date.now();
         const metadata = await this.buildMetadata(connection, scope, options);
+        await this.reportProgress(options, {
+            phase: "inventory",
+            message: `Metadata lista en ${formatDuration(Date.now() - metadataStartedAt)}`
+        });
+
         const metadataPath = path.join(rootDir, "metadata.json");
+        const metadataWriteStartedAt = Date.now();
         await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2), "utf-8");
 
         await this.reportProgress(options, {
             phase: "write",
-            message: "Escribiendo metadata.json"
+            message: `metadata.json escrito en ${formatDuration(Date.now() - metadataWriteStartedAt)}`
         });
 
+        const vaultStartedAt = Date.now();
         await this.generateVault(vaultDir, metadata, scope, options);
 
         await this.reportProgress(options, {
+            phase: "write",
+            message: `Vault generado en ${formatDuration(Date.now() - vaultStartedAt)}`
+        });
+
+        await this.reportProgress(options, {
             phase: "done",
-            message: "SecondBrain generado correctamente"
+            message: `SecondBrain generado correctamente en ${formatDuration(Date.now() - exportStartedAt)}`
         });
 
         return {
@@ -179,12 +201,26 @@ export class SecondBrainService {
         const includeAll = scope.mode === "full";
 
         if (includeAll) {
-            await this.collectCategory(connection, metadata, "tables", options);
-            await this.collectCategory(connection, metadata, "queries", options);
-            await this.collectCategory(connection, metadata, "forms", options);
-            await this.collectCategory(connection, metadata, "reports", options);
-            await this.collectCategory(connection, metadata, "macros", options);
-            await this.collectCategory(connection, metadata, "modules", options);
+            // Pre-fetch object lists to compute global total for progress bar
+            const toolCategoriesToPreload: AccessCategoryKey[] = ["tables", "queries", "forms", "reports", "macros", "modules"];
+            const preloadedLists = new Map<AccessCategoryKey, import("../models/types").AccessObjectInfo[]>();
+            await this.reportProgress(options, { phase: "inventory", message: "Preparando inventario de objetos..." });
+            for (const cat of toolCategoriesToPreload) {
+                const toolType = toolTypeForCategory(cat);
+                if (toolType) {
+                    const items = await this.mcpClient.listObjects(connection, toolType, SecondBrainService.INVENTORY_TIMEOUT_MS);
+                    preloadedLists.set(cat, items);
+                }
+            }
+            this._globalProgressTotal = [...preloadedLists.values()].reduce((sum, list) => sum + list.length, 0);
+            this._globalProgressOffset = 0;
+
+            await this.collectCategory(connection, metadata, "tables", options, preloadedLists.get("tables"));
+            await this.collectCategory(connection, metadata, "queries", options, preloadedLists.get("queries"));
+            await this.collectCategory(connection, metadata, "forms", options, preloadedLists.get("forms"));
+            await this.collectCategory(connection, metadata, "reports", options, preloadedLists.get("reports"));
+            await this.collectCategory(connection, metadata, "macros", options, preloadedLists.get("macros"));
+            await this.collectCategory(connection, metadata, "modules", options, preloadedLists.get("modules"));
             await this.collectCategory(connection, metadata, "relationships", options);
             await this.collectCategory(connection, metadata, "references", options);
             await this.collectLinkedAndStartup(connection, metadata, options);
@@ -214,7 +250,8 @@ export class SecondBrainService {
         connection: AccessConnection,
         metadata: SecondBrainMetadata,
         categoryKey: AccessCategoryKey,
-        options?: SecondBrainExportOptions
+        options?: SecondBrainExportOptions,
+        preloadedObjects?: import("../models/types").AccessObjectInfo[]
     ): Promise<void> {
         if (categoryKey === "relationships") {
             await this.reportProgress(options, {
@@ -249,24 +286,155 @@ export class SecondBrainService {
             phase: "inventory",
             message: `Listando ${categoryKey}`
         });
-        const objects = await this.mcpClient.listObjects(connection, toolType, SecondBrainService.INVENTORY_TIMEOUT_MS);
+        const objects = preloadedObjects ?? await this.mcpClient.listObjects(connection, toolType, SecondBrainService.INVENTORY_TIMEOUT_MS);
         const total = objects.length;
+        const globalOffset = this._globalProgressOffset;
+        const useGlobal = this._globalProgressTotal > 0;
         let completed = 0;
         for (const objectInfo of objects) {
             completed += 1;
+            const objectStartedAt = Date.now();
             await this.reportProgress(options, {
                 phase: "object",
                 message: `${categoryKey}: ${objectInfo.name}`,
-                completed,
-                total
+                completed: useGlobal ? globalOffset + completed : completed,
+                total: useGlobal ? this._globalProgressTotal : total
             });
+
+            const stopSlowObjectWarnings = this.startSlowObjectWarnings(
+                options,
+                categoryKey,
+                objectInfo.name,
+                completed,
+                total,
+                objectStartedAt
+            );
+
             try {
                 await this.collectSingleObject(connection, metadata, categoryKey, objectInfo, options);
+                const objectDurationMs = Date.now() - objectStartedAt;
+                if (objectDurationMs >= SecondBrainService.SLOW_OBJECT_WARNING_MS) {
+                    await this.reportProgress(options, {
+                        phase: "inventory",
+                        message: `${categoryKey}: ${objectInfo.name} completado en ${formatDuration(objectDurationMs)} (${completed}/${total})`
+                    });
+                }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 metadata.warnings.push(`No se pudo exportar ${categoryKey}:${objectInfo.name} -> ${message}`);
+                await this.reportProgress(options, {
+                    phase: "inventory",
+                    message: `${categoryKey}: ${objectInfo.name} fallo tras ${formatDuration(Date.now() - objectStartedAt)} -> ${message}`
+                });
+            } finally {
+                stopSlowObjectWarnings();
             }
         }
+
+        if (useGlobal) {
+            this._globalProgressOffset += total;
+        }
+    }
+
+    private startSlowObjectWarnings(
+        options: SecondBrainExportOptions | undefined,
+        categoryKey: AccessCategoryKey,
+        objectName: string,
+        completed: number,
+        total: number,
+        startedAt: number
+    ): () => void {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let warningCount = 0;
+        let stopped = false;
+
+        const schedule = (delayMs: number): void => {
+            timer = setTimeout(() => {
+                if (stopped) {
+                    return;
+                }
+
+                warningCount += 1;
+                void this.reportProgress(options, {
+                    phase: "inventory",
+                    message: `${categoryKey}: ${objectName} sigue en curso tras ${formatDuration(Date.now() - startedAt)} (${completed}/${total}, aviso ${warningCount})`
+                });
+
+                schedule(SecondBrainService.SLOW_OBJECT_REPEAT_MS);
+            }, delayMs);
+        };
+
+        schedule(SecondBrainService.SLOW_OBJECT_WARNING_MS);
+
+        return () => {
+            stopped = true;
+            if (timer) {
+                clearTimeout(timer);
+            }
+        };
+    }
+
+    private async recoverAfterTimeout(
+        options: SecondBrainExportOptions | undefined,
+        contextLabel: string,
+        metadata: SecondBrainMetadata
+    ): Promise<void> {
+        await this.reportProgress(options, {
+            phase: "inventory",
+            message: `Timeout en ${contextLabel}. Reconectando MCP antes de continuar.`
+        });
+
+        try {
+            await this.mcpClient.reconnect();
+            await this.reportProgress(options, {
+                phase: "inventory",
+                message: `MCP reconectado tras timeout en ${contextLabel}`
+            });
+        } catch (reconnectError) {
+            const reconnectMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
+            metadata.warnings.push(`No se pudo reconectar MCP tras timeout en ${contextLabel} -> ${reconnectMessage}`);
+        }
+    }
+
+    private async runWithTimeoutRetry<T>(
+        options: SecondBrainExportOptions | undefined,
+        metadata: SecondBrainMetadata,
+        contextLabel: string,
+        operation: () => Promise<T>
+    ): Promise<T> {
+        let attempt = 0;
+        while (true) {
+            try {
+                return await operation();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (!isLikelyTimeoutError(message) || attempt >= SecondBrainService.MCP_TIMEOUT_RETRIES) {
+                    throw error;
+                }
+
+                if (!this.timeoutDegradedMode) {
+                    this.timeoutDegradedMode = true;
+                    await this.reportProgress(options, {
+                        phase: "inventory",
+                        message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${contextLabel}.`
+                    });
+                }
+
+                attempt += 1;
+                await this.reportProgress(options, {
+                    phase: "inventory",
+                    message: `Timeout en ${contextLabel}. Reintentando (${attempt}/${SecondBrainService.MCP_TIMEOUT_RETRIES}) tras reconexion MCP.`
+                });
+                await this.recoverAfterTimeout(options, contextLabel, metadata);
+            }
+        }
+    }
+
+    private resolveTimeout(baseTimeoutMs: number): number {
+        if (!this.timeoutDegradedMode) {
+            return baseTimeoutMs;
+        }
+        return Math.min(baseTimeoutMs, SecondBrainService.DEGRADED_TIMEOUT_MS);
     }
 
     private async collectSingleObject(
@@ -336,7 +504,12 @@ export class SecondBrainService {
         if (categoryKey === "queries") {
             let sql = "";
             try {
-                sql = fixEncoding(await this.mcpClient.getQuerySql(connection, objectName, SecondBrainService.QUERY_TIMEOUT_MS)) ?? "";
+                sql = fixEncoding(await this.runWithTimeoutRetry(
+                    options,
+                    metadata,
+                    `${categoryKey}:${objectName}:sql`,
+                    async () => this.mcpClient.getQuerySql(connection, objectName, this.resolveTimeout(SecondBrainService.QUERY_TIMEOUT_MS))
+                )) ?? "";
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 metadata.warnings.push(`SQL no disponible para query:${objectName} -> ${message}`);
@@ -352,26 +525,76 @@ export class SecondBrainService {
 
         if (categoryKey === "forms" || categoryKey === "reports") {
             const objectType = categoryKey === "forms" ? "form" : "report";
-            const controls = await this.mcpClient.getControls(
-                connection,
-                objectType,
-                objectName,
-                SecondBrainService.UI_TIMEOUT_MS
-            );
-            const properties = await this.mcpClient.getFormReportProperties(
-                connection,
-                objectType,
-                objectName,
-                SecondBrainService.UI_TIMEOUT_MS
-            );
+            let controls: AccessControlInfo[] = [];
+            let properties: AccessPropertyInfo[] = [];
+            let docContent = "";
+
+            await this.reportProgress(options, {
+                phase: "inventory",
+                message: `${categoryKey}: ${objectName} -> controles`
+            });
+            try {
+                controls = await this.runWithTimeoutRetry(
+                    options,
+                    metadata,
+                    `${categoryKey}:${objectName}:controles`,
+                    async () => this.mcpClient.getControls(
+                        connection,
+                        objectType,
+                        objectName,
+                        this.resolveTimeout(SecondBrainService.UI_CONTROLS_TIMEOUT_MS)
+                    )
+                );
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                metadata.warnings.push(`Controles no disponibles para ${categoryKey}:${objectName} -> ${message}`);
+            }
+
+            await this.reportProgress(options, {
+                phase: "inventory",
+                message: `${categoryKey}: ${objectName} -> propiedades`
+            });
+            try {
+                properties = await this.runWithTimeoutRetry(
+                    options,
+                    metadata,
+                    `${categoryKey}:${objectName}:propiedades`,
+                    async () => this.mcpClient.getFormReportProperties(
+                        connection,
+                        objectType,
+                        objectName,
+                        this.resolveTimeout(SecondBrainService.UI_TIMEOUT_MS)
+                    )
+                );
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                metadata.warnings.push(`Propiedades no disponibles para ${categoryKey}:${objectName} -> ${message}`);
+            }
+
             const recordSource = fixEncoding(properties.find((item) => item.name.toLowerCase() === "recordsource")?.value ?? "") ?? "";
-            const doc = await this.mcpClient.getObjectDocument(
-                connection,
-                categoryKey,
-                objectName,
-                objectInfo.metadata,
-                SecondBrainService.UI_TIMEOUT_MS
-            );
+
+            await this.reportProgress(options, {
+                phase: "inventory",
+                message: `${categoryKey}: ${objectName} -> codigo`
+            });
+            try {
+                const doc = await this.runWithTimeoutRetry(
+                    options,
+                    metadata,
+                    `${categoryKey}:${objectName}:codigo`,
+                    async () => this.mcpClient.getObjectDocument(
+                        connection,
+                        categoryKey,
+                        objectName,
+                        objectInfo.metadata,
+                        this.resolveTimeout(SecondBrainService.UI_TIMEOUT_MS)
+                    )
+                );
+                docContent = doc.content;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                metadata.warnings.push(`Codigo no disponible para ${categoryKey}:${objectName} -> ${message}`);
+            }
 
             const propVal = (key: string): string | undefined =>
                 properties.find((p) => p.name.toLowerCase() === key)?.value;
@@ -391,8 +614,8 @@ export class SecondBrainService {
                     caption: fixEncoding(ctrl.caption),
                     source_object: ctrl.source_object
                 })),
-                code: doc.content,
-                procedures: extractVbaProcedures(doc.content)
+                code: docContent,
+                procedures: extractVbaProcedures(docContent)
             };
 
             if (categoryKey === "forms") {
@@ -498,6 +721,7 @@ export class SecondBrainService {
         scope: SecondBrainScope,
         options?: SecondBrainExportOptions
     ): Promise<void> {
+        const vaultStartedAt = Date.now();
         const useHighDensity = options?.linkDensity === "high";
         const folders = {
             tables: path.join(vaultDir, "tables"),
@@ -519,9 +743,23 @@ export class SecondBrainService {
             message: "Escribiendo notas del vault"
         });
 
+        const indexingStartedAt = Date.now();
+
         const columnsByTable = groupBy(metadata.columns, (item) => String(item.table_name ?? ""));
         const pksByTable = groupBy(metadata.primary_keys, (item) => String(item.table_name ?? ""));
         const idxByTable = groupBy(metadata.indexes, (item) => String(item.table_name ?? ""));
+        const relationshipsByTable = new Map<string, Set<string>>();
+        for (const rel of metadata.relationships) {
+            const relPath = `relationships/${sanitize(String(rel.name ?? "(sin nombre)"))}`;
+            const oneSide = String(rel.table ?? "");
+            const manySide = String(rel.foreign_table ?? "");
+
+            addToSetMap(relationshipsByTable, oneSide, relPath);
+            addToSetMap(relationshipsByTable, manySide, relPath);
+        }
+
+        const foreignKeysFromTable = groupBy(metadata.foreign_keys, (item) => String(item.fk_table ?? ""));
+        const foreignKeysToTable = groupBy(metadata.foreign_keys, (item) => String(item.ref_table ?? ""));
 
         const tableTargets = new Map(metadata.tables.map((table) => [String(table.table_name ?? ""), `tables/${sanitize(String(table.table_name ?? ""))}`] as const));
         const queryTargets = new Map(metadata.queries.map((query) => [String(query.name ?? ""), `queries/${sanitize(String(query.name ?? ""))}`] as const));
@@ -576,10 +814,16 @@ export class SecondBrainService {
             "_overview",
             "_health",
             "_dependencies",
-            "_guide"
+            "_guide",
+            "_entrypoints",
+            "_critical-objects",
+            "_known-issues",
+            "_reading-order",
+            "_ai-prompt"
         ]);
 
         const noteDrafts = new Map<string, NoteDraft>();
+        const bodyWrites: Array<Promise<void>> = [];
 
         const registerNote = (notePath: string, lines: string[], outgoing: Iterable<string> = []): void => {
             const validOutgoing = new Set<string>();
@@ -588,7 +832,8 @@ export class SecondBrainService {
                     validOutgoing.add(target);
                 }
             }
-            noteDrafts.set(notePath, { notePath, lines, outgoing: validOutgoing });
+            noteDrafts.set(notePath, { notePath, outgoing: validOutgoing });
+            bodyWrites.push(fs.writeFile(path.join(vaultDir, `${notePath}.md`), lines.join("\n"), "utf-8"));
         };
 
         const queryDependenciesByQuery = new Map<string, Set<string>>();
@@ -610,6 +855,48 @@ export class SecondBrainService {
             queryDependenciesByQuery.set(queryName, deps);
         }
 
+        const queriesByTable = new Map<string, string[]>();
+        for (const query of metadata.queries) {
+            const queryName = String(query.name ?? "");
+            const queryPath = queryTargets.get(queryName);
+            if (!queryPath) {
+                continue;
+            }
+
+            for (const dependency of queryDependenciesByQuery.get(queryName) ?? []) {
+                if (!dependency.startsWith("tables/")) {
+                    continue;
+                }
+
+                const queries = queriesByTable.get(dependency) ?? [];
+                queries.push(queryPath);
+                queriesByTable.set(dependency, queries);
+            }
+        }
+
+        const formsByRecordSource = new Map<string, string[]>();
+        for (const form of metadata.forms) {
+            const formName = String(form.name ?? "");
+            const formPath = formTargets.get(formName);
+            if (!formPath) {
+                continue;
+            }
+
+            const recordSource = normalizeIdentifier(String(form.record_source ?? ""));
+            if (!recordSource) {
+                continue;
+            }
+
+            const forms = formsByRecordSource.get(recordSource) ?? [];
+            forms.push(formPath);
+            formsByRecordSource.set(recordSource, forms);
+        }
+
+        await this.reportProgress(options, {
+            phase: "write",
+            message: `Indices del vault listos en ${formatDuration(Date.now() - indexingStartedAt)}`
+        });
+
         for (const table of metadata.tables) {
             const name = String(table.table_name ?? "");
             const cols = columnsByTable.get(name) ?? [];
@@ -617,12 +904,7 @@ export class SecondBrainService {
             const idx = idxByTable.get(name) ?? [];
             const tableNotePath = `tables/${sanitize(name)}`;
 
-            const outgoing = new Set<string>();
-            for (const rel of metadata.relationships) {
-                if (String(rel.table ?? "") === name || String(rel.foreign_table ?? "") === name) {
-                    outgoing.add(`relationships/${sanitize(String(rel.name ?? "(sin nombre)"))}`);
-                }
-            }
+            const outgoing = new Set(relationshipsByTable.get(name) ?? []);
             const mocPath = mocByNotePath.get(tableNotePath);
             if (mocPath) {
                 outgoing.add(mocPath);
@@ -658,8 +940,8 @@ export class SecondBrainService {
                 });
             }
 
-            const fksFromTable = metadata.foreign_keys.filter((fk) => String(fk.fk_table ?? "") === name);
-            const fksToTable = metadata.foreign_keys.filter((fk) => String(fk.ref_table ?? "") === name);
+            const fksFromTable = foreignKeysFromTable.get(name) ?? [];
+            const fksToTable = foreignKeysToTable.get(name) ?? [];
             if (fksFromTable.length > 0) {
                 lines.push("", "## Foreign Keys", "", "| FK Name | Column | Ref Table | Ref Column |", "|---|---|---|---|");
                 for (const fk of fksFromTable) {
@@ -907,6 +1189,28 @@ export class SecondBrainService {
         registerNote("startup/startup-options", startupContent.split("\n"));
 
         const stats = this.computeStats(metadata);
+        const autoExecMacros = metadata.macros
+            .map((macro) => String(macro.name ?? ""))
+            .filter((name) => name && name.toLowerCase().includes("autoexec"));
+        const likelyEntryForms = metadata.forms
+            .map((form) => ({
+                name: String(form.name ?? ""),
+                recordSource: String(form.record_source ?? ""),
+                controls: Array.isArray(form.controls) ? form.controls.length : 0,
+                procedures: Array.isArray(form.procedures) ? form.procedures.length : 0
+            }))
+            .filter((form) => form.name && !isLikelySubObjectName(form.name))
+            .sort((left, right) => (right.controls + right.procedures * 2) - (left.controls + left.procedures * 2) || left.name.localeCompare(right.name))
+            .slice(0, 12);
+        const likelyEntryReports = metadata.reports
+            .map((report) => ({
+                name: String(report.name ?? ""),
+                controls: Array.isArray(report.controls) ? report.controls.length : 0,
+                procedures: Array.isArray(report.procedures) ? report.procedures.length : 0
+            }))
+            .filter((report) => report.name && !isLikelySubObjectName(report.name))
+            .sort((left, right) => (right.controls + right.procedures * 2) - (left.controls + left.procedures * 2) || left.name.localeCompare(right.name))
+            .slice(0, 10);
         const indexContent = [
             `# Access Second Brain: ${metadata.database}`,
             "",
@@ -921,8 +1225,13 @@ export class SecondBrainService {
             "## Main Notes / Notas principales",
             "",
             "- [[_overview]]",
+            "- [[_entrypoints]]",
+            "- [[_critical-objects]]",
             "- [[_health]]",
+            "- [[_known-issues]]",
             "- [[_dependencies]]",
+            "- [[_reading-order]]",
+            "- [[_ai-prompt]]",
             "- [[_guide]]",
             ""
         ].join("\n");
@@ -943,6 +1252,73 @@ export class SecondBrainService {
         const queriesNoSql = metadata.queries
             .filter((q) => !String(q.sql ?? "").trim())
             .map((q) => String(q.name ?? ""));
+        const warningsByObject = new Map<string, string[]>();
+        for (const warning of metadata.warnings) {
+            collectWarningMatches(warningsByObject, warning, "queries", metadata.queries, (item) => String(item.name ?? ""));
+            collectWarningMatches(warningsByObject, warning, "forms", metadata.forms, (item) => String(item.name ?? ""));
+            collectWarningMatches(warningsByObject, warning, "reports", metadata.reports, (item) => String(item.name ?? ""));
+            collectWarningMatches(warningsByObject, warning, "modules", metadata.modules, (item) => String(item.name ?? ""));
+            collectWarningMatches(warningsByObject, warning, "macros", metadata.macros, (item) => String(item.name ?? ""));
+            collectWarningMatches(warningsByObject, warning, "tables", metadata.tables, (item) => String(item.table_name ?? ""));
+        }
+
+        const temporaryIncomingByTarget = new Map<string, Set<string>>();
+        for (const [sourcePath, draft] of noteDrafts.entries()) {
+            for (const target of draft.outgoing) {
+                addToSetMap(temporaryIncomingByTarget, target, sourcePath);
+            }
+        }
+
+        const criticalObjects = [
+            ...metadata.tables.map((table) => {
+                const name = String(table.table_name ?? "");
+                const notePath = tableTargets.get(name) ?? `tables/${sanitize(name)}`;
+                const score = (temporaryIncomingByTarget.get(notePath)?.size ?? 0) * 3
+                    + (relationshipsByTable.get(name)?.size ?? 0) * 2
+                    + (queriesByTable.get(notePath)?.length ?? 0) * 2
+                    + (formsByRecordSource.get(name)?.length ?? 0);
+                return { kind: "table", name, notePath, score, detail: `${queriesByTable.get(notePath)?.length ?? 0} queries, ${formsByRecordSource.get(name)?.length ?? 0} forms` };
+            }),
+            ...metadata.queries.map((query) => {
+                const name = String(query.name ?? "");
+                const notePath = queryTargets.get(name) ?? `queries/${sanitize(name)}`;
+                const deps = queryDependenciesByQuery.get(name)?.size ?? 0;
+                const score = (temporaryIncomingByTarget.get(notePath)?.size ?? 0) * 3
+                    + deps * 2
+                    + Math.min(10, Math.floor(String(query.sql ?? "").length / 250));
+                return { kind: "query", name, notePath, score, detail: `${deps} dependencies, ${String(query.type ?? "unknown")}` };
+            }),
+            ...metadata.forms.map((form) => {
+                const name = String(form.name ?? "");
+                const notePath = formTargets.get(name) ?? `forms/${sanitize(name)}`;
+                const controls = Array.isArray(form.controls) ? form.controls.length : 0;
+                const procedures = Array.isArray(form.procedures) ? form.procedures.length : 0;
+                const score = (temporaryIncomingByTarget.get(notePath)?.size ?? 0) * 3
+                    + controls + procedures * 2 + (String(form.record_source ?? "").trim() ? 2 : 0);
+                return { kind: "form", name, notePath, score, detail: `${controls} controls, ${procedures} procedures` };
+            }),
+            ...metadata.reports.map((report) => {
+                const name = String(report.name ?? "");
+                const notePath = reportTargets.get(name) ?? `reports/${sanitize(name)}`;
+                const controls = Array.isArray(report.controls) ? report.controls.length : 0;
+                const procedures = Array.isArray(report.procedures) ? report.procedures.length : 0;
+                const score = (temporaryIncomingByTarget.get(notePath)?.size ?? 0) * 3 + controls + procedures * 2;
+                return { kind: "report", name, notePath, score, detail: `${controls} controls, ${procedures} procedures` };
+            }),
+            ...metadata.modules.map((module) => {
+                const name = String(module.name ?? "");
+                const notePath = moduleTargets.get(name) ?? `modules/${sanitize(name)}`;
+                const procedures = Array.isArray(module.procedures) ? module.procedures.length : 0;
+                const score = (temporaryIncomingByTarget.get(notePath)?.size ?? 0) * 3
+                    + (noteDrafts.get(notePath)?.outgoing.size ?? 0) * 2
+                    + procedures * 2
+                    + Math.min(10, Math.floor(countVbaCodeLines(String(module.code ?? "")) / 40));
+                return { kind: "module", name, notePath, score, detail: `${procedures} procedures` };
+            })
+        ]
+            .filter((item) => item.name)
+            .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+            .slice(0, 25);
 
         const refsSection: string[] = metadata.references.length > 0
             ? [
@@ -1001,6 +1377,158 @@ export class SecondBrainService {
             ""
         ].join("\n");
 
+        const entrypointsContent = [
+            "# Entrypoints / Puntos de entrada",
+            "",
+            "## Startup Options / Opciones de inicio",
+            "",
+            ...(metadata.startup_options.length > 0
+                ? metadata.startup_options.map((item) => `- ${item.option ?? ""}: ${String(item.value ?? "") || "(empty)"}`)
+                : ["- None"]),
+            "",
+            "## AutoExec Macros / Macros de inicio",
+            "",
+            ...(autoExecMacros.length > 0 ? autoExecMacros.map((name) => `- ${wiki(`macros/${sanitize(name)}`)}`) : ["- None"]),
+            "",
+            "## Likely Main Forms / Formularios principales probables",
+            "",
+            ...(likelyEntryForms.length > 0
+                ? likelyEntryForms.map((form) => `- ${wiki(`forms/${sanitize(form.name)}`)} | RecordSource: ${form.recordSource || "-"} | Controls: ${form.controls} | Procedures: ${form.procedures}`)
+                : ["- None"]),
+            "",
+            "## Likely Main Reports / Informes principales probables",
+            "",
+            ...(likelyEntryReports.length > 0
+                ? likelyEntryReports.map((report) => `- ${wiki(`reports/${sanitize(report.name)}`)} | Controls: ${report.controls} | Procedures: ${report.procedures}`)
+                : ["- None"]),
+            "",
+            "## Suggested First Reads / Primeras lecturas sugeridas",
+            "",
+            "- [[_overview]]",
+            "- [[_dependencies]]",
+            "- [[_critical-objects]]",
+            "- [[_known-issues]]",
+            "- [[_reading-order]]",
+            ""
+        ].join("\n");
+
+        const criticalObjectsContent = [
+            "# Critical Objects / Objetos críticos",
+            "",
+            "Objetos con mayor centralidad heurística para empezar análisis, depuración o refactor.",
+            "",
+            "| Rank | Kind | Object | Score | Signals |",
+            "|---:|---|---|---:|---|",
+            ...criticalObjects.map((item, index) => `| ${index + 1} | ${item.kind} | ${wiki(item.notePath)} | ${item.score} | ${item.detail} |`),
+            ""
+        ].join("\n");
+
+        const timeoutWarnings = metadata.warnings.filter((warning) => isLikelyTimeoutError(warning));
+        const partialObjects = Array.from(warningsByObject.entries())
+            .sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]));
+
+        const knownIssuesContent = [
+            "# Known Issues / Problemas conocidos",
+            "",
+            "## Timeout Warnings / Warnings por timeout",
+            "",
+            ...(timeoutWarnings.length > 0 ? timeoutWarnings.map((warning) => `- ${warning}`) : ["- None"]),
+            "",
+            "## Partial Objects / Objetos parciales o con incidencias",
+            "",
+            ...(partialObjects.length > 0
+                ? partialObjects.flatMap(([notePath, warnings]) => [`- ${wiki(notePath)}`, ...warnings.map((warning) => `  - ${warning}`)])
+                : ["- None"]),
+            "",
+            "## Structural Smells / Señales estructurales",
+            "",
+            `- Forms without RecordSource: ${formsNoSource.length}`,
+            `- Tables without relationships: ${tablesNoRel.length}`,
+            `- Modules without procedures: ${modulesNoProcs.length}`,
+            `- Queries without SQL: ${queriesNoSql.length}`,
+            "",
+            "## Review First / Revisar primero",
+            "",
+            ...(criticalObjects.slice(0, 10).map((item) => `- ${wiki(item.notePath)}`)),
+            ""
+        ].join("\n");
+
+        const readingOrderContent = [
+            "# Reading Order / Orden de lectura",
+            "",
+            "## UI bug / Problema de interfaz",
+            "",
+            "1. [[_entrypoints]]",
+            "2. Nota del formulario o informe afectado",
+            "3. Su RecordSource en [[_dependencies]] o en la nota de query/tabla",
+            "4. El módulo o macro relacionado",
+            "",
+            "## Data bug / Problema de datos",
+            "",
+            "1. [[_dependencies]]",
+            "2. Nota de la tabla afectada",
+            "3. Queries que leen o escriben esa tabla",
+            "4. Forms/reports que usan esas queries",
+            "",
+            "## VBA bug / Problema en VBA",
+            "",
+            "1. [[_critical-objects]]",
+            "2. Nota del módulo o code-behind",
+            "3. Objetos enlazados desde la sección Links",
+            "4. [[_known-issues]] para ver si hay extracción parcial",
+            "",
+            "## Performance issue / Problema de rendimiento",
+            "",
+            "1. [[_known-issues]]",
+            "2. [[_critical-objects]]",
+            "3. Queries con SQL ausente o timeouts",
+            "4. Forms/reports con muchos controles o incidencias",
+            ""
+        ].join("\n");
+
+        const aiPromptContent = [
+            "# AI Prompt / Prompt para IA",
+            "",
+            "Copia y pega este prompt en tu herramienta de IA junto con las notas relevantes de este Second Brain.",
+            "",
+            "## Prompt base",
+            "",
+            "```text",
+            `Analiza este Second Brain de la base Access ${metadata.database}.`,
+            "Usa primero _overview.md, _dependencies.md, _critical-objects.md, _known-issues.md y _reading-order.md para orientarte.",
+            "Después lee solo las notas concretas relacionadas con el problema.",
+            "",
+            "Objetivo:",
+            "- adquirir contexto rápido sin inventar información",
+            "- localizar el origen probable del problema",
+            "- identificar tablas, queries, forms, reports, macros y módulos implicados",
+            "- señalar riesgos, dependencias y posibles efectos secundarios",
+            "- proponer una estrategia mínima y segura para corregir o refactorizar",
+            "",
+            "Reglas:",
+            "- trata como parciales los objetos listados en _known-issues.md",
+            "- no asumas comportamientos que no estén respaldados por notas o metadata",
+            "- si falta contexto, indica exactamente qué nota adicional necesitas leer",
+            "- prioriza soluciones pequeñas, locales y verificables",
+            "```",
+            "",
+            "## Qué compartir con la IA según el problema",
+            "",
+            "- Query rota: _dependencies.md + nota de la query + tablas relacionadas",
+            "- Form/report roto: nota del form/report + su RecordSource + módulo/macro relacionado",
+            "- Error VBA: nota del módulo + objetos enlazados desde Links",
+            "- Problema general: _overview.md + _critical-objects.md + _known-issues.md + _dependencies.md",
+            "",
+            "## Suggested context pack / Pack sugerido",
+            "",
+            "- [[_overview]]",
+            "- [[_dependencies]]",
+            "- [[_critical-objects]]",
+            "- [[_known-issues]]",
+            "- [[_reading-order]]",
+            ""
+        ].join("\n");
+
         // _dependencies note: cross-reference map
         const depsOutgoing = new Set<string>();
         const depsLines: string[] = [
@@ -1041,14 +1569,8 @@ export class SecondBrainService {
             const tPath = tableTargets.get(tName);
             if (!tPath) { continue; }
             depsOutgoing.add(tPath);
-            const usedByQueries = metadata.queries
-                .filter((q) => (queryDependenciesByQuery.get(String(q.name ?? "")) ?? new Set()).has(tPath))
-                .map((q) => { const p = queryTargets.get(String(q.name ?? "")); return p ? wiki(p) : ""; })
-                .filter(Boolean).join(", ") || "-";
-            const usedByForms = metadata.forms
-                .filter((f) => normalizeIdentifier(String(f.record_source ?? "")) === tName)
-                .map((f) => { const p = formTargets.get(String(f.name ?? "")); return p ? wiki(p) : ""; })
-                .filter(Boolean).join(", ") || "-";
+            const usedByQueries = (queriesByTable.get(tPath) ?? []).map((queryPath) => wiki(queryPath)).join(", ") || "-";
+            const usedByForms = (formsByRecordSource.get(tName) ?? []).map((formPath) => wiki(formPath)).join(", ") || "-";
             depsLines.push(`| ${wiki(tPath)} | ${usedByQueries} | ${usedByForms} |`);
         }
         depsLines.push("");
@@ -1082,8 +1604,13 @@ export class SecondBrainService {
             "|---|---|",
             `| ${wiki("_index")} | Entry point with general statistics |`,
             `| ${wiki("_overview")} | Summary, MOCs and VBA references |`,
+            `| ${wiki("_entrypoints")} | Likely entry forms, reports, startup options and AutoExec macros |`,
+            `| ${wiki("_critical-objects")} | Objects with highest diagnostic and refactor priority |`,
             `| ${wiki("_health")} | Quality checks: forms without source, orphan tables… |`,
+            `| ${wiki("_known-issues")} | Timeouts, partial objects and warnings grouped for review |`,
             `| ${wiki("_dependencies")} | Cross-reference map: forms→tables, queries→tables |`,
+            `| ${wiki("_reading-order")} | Recommended reading sequence by problem type |`,
+            `| ${wiki("_ai-prompt")} | Ready-to-copy prompt and context pack for AI analysis |`,
             "",
             "#### Folder structure",
             "",
@@ -1169,8 +1696,13 @@ export class SecondBrainService {
             "|---|---|",
             `| ${wiki("_index")} | Punto de entrada con estadísticas generales |`,
             `| ${wiki("_overview")} | Resumen, MOCs y referencias VBA |`,
+            `| ${wiki("_entrypoints")} | Formularios, informes y macros de inicio más probables |`,
+            `| ${wiki("_critical-objects")} | Objetos con mayor prioridad diagnóstica y de refactor |`,
             `| ${wiki("_health")} | Checks de calidad: formularios sin fuente, tablas huérfanas… |`,
+            `| ${wiki("_known-issues")} | Timeouts, objetos parciales y advertencias agrupadas |`,
             `| ${wiki("_dependencies")} | Mapa cruzado: formularios→tablas, consultas→tablas |`,
+            `| ${wiki("_reading-order")} | Orden recomendado de lectura según el problema |`,
+            `| ${wiki("_ai-prompt")} | Prompt listo para usar con IA y pack de contexto |`,
             "",
             "#### Estructura de carpetas",
             "",
@@ -1235,12 +1767,99 @@ export class SecondBrainService {
             ""
         ].join("\n");
 
-        registerNote("_index", indexContent.split("\n"), ["_overview", "_health", "_dependencies", "_guide"]);
-        registerNote("_overview", overviewContent.split("\n"), ["_index", "_health", "_dependencies", "_guide", ...mocGroups.keys()]);
+        registerNote("_index", indexContent.split("\n"), ["_overview", "_entrypoints", "_critical-objects", "_health", "_known-issues", "_dependencies", "_reading-order", "_ai-prompt", "_guide"]);
+        registerNote("_overview", overviewContent.split("\n"), ["_index", "_entrypoints", "_critical-objects", "_known-issues", "_dependencies", "_reading-order", "_ai-prompt", "_guide", ...mocGroups.keys()]);
+        registerNote("_entrypoints", entrypointsContent.split("\n"), ["_index", "_overview", "_critical-objects", "_dependencies", "_reading-order"]);
+        registerNote("_critical-objects", criticalObjectsContent.split("\n"), ["_index", "_overview", "_known-issues", "_dependencies", ...criticalObjects.map((item) => item.notePath)]);
         registerNote("_health", healthContent.split("\n"), ["_index", "_overview"]);
         registerNote("_dependencies", depsLines, depsOutgoing);
-        registerNote("_guide", guideContent.split("\n"), ["_index", "_overview", "_health", "_dependencies"]);
+        registerNote("_known-issues", knownIssuesContent.split("\n"), ["_index", "_overview", "_health", "_critical-objects", ...partialObjects.map(([notePath]) => notePath)]);
+        registerNote("_reading-order", readingOrderContent.split("\n"), ["_index", "_overview", "_entrypoints", "_dependencies", "_critical-objects", "_known-issues"]);
+        registerNote("_ai-prompt", aiPromptContent.split("\n"), ["_index", "_overview", "_dependencies", "_critical-objects", "_known-issues", "_reading-order", "_guide"]);
+        registerNote("_guide", guideContent.split("\n"), ["_index", "_overview", "_entrypoints", "_critical-objects", "_health", "_known-issues", "_dependencies", "_reading-order", "_ai-prompt"]);
 
+        const aiIndexStartedAt = Date.now();
+        const aiIndex = {
+            database: metadata.database,
+            generated: metadata.generated,
+            scope: this.scopeLabel(scope),
+            keyDocuments: [
+                "_index.md",
+                "_overview.md",
+                "_entrypoints.md",
+                "_critical-objects.md",
+                "_health.md",
+                "_known-issues.md",
+                "_dependencies.md",
+                "_reading-order.md",
+                "_ai-prompt.md",
+                "_guide.md"
+            ],
+            stats,
+            warnings: metadata.warnings,
+            criticalObjects,
+            objects: [
+                ...metadata.tables.map((table) => buildAiIndexEntry({
+                    kind: "table",
+                    name: String(table.table_name ?? ""),
+                    notePath: tableTargets.get(String(table.table_name ?? "")) ?? `tables/${sanitize(String(table.table_name ?? ""))}`,
+                    outgoing: noteDrafts.get(tableTargets.get(String(table.table_name ?? "")) ?? `tables/${sanitize(String(table.table_name ?? ""))}`)?.outgoing ?? new Set<string>(),
+                    flags: deriveObjectFlags(warningsByObject.get(tableTargets.get(String(table.table_name ?? "")) ?? `tables/${sanitize(String(table.table_name ?? ""))}`), []),
+                    recordSource: undefined,
+                    procedures: 0
+                })),
+                ...metadata.queries.map((query) => buildAiIndexEntry({
+                    kind: "query",
+                    name: String(query.name ?? ""),
+                    notePath: queryTargets.get(String(query.name ?? "")) ?? `queries/${sanitize(String(query.name ?? ""))}`,
+                    outgoing: noteDrafts.get(queryTargets.get(String(query.name ?? "")) ?? `queries/${sanitize(String(query.name ?? ""))}`)?.outgoing ?? new Set<string>(),
+                    flags: deriveObjectFlags(warningsByObject.get(queryTargets.get(String(query.name ?? "")) ?? `queries/${sanitize(String(query.name ?? ""))}`), !String(query.sql ?? "").trim() ? ["sql-unavailable"] : []),
+                    recordSource: undefined,
+                    procedures: 0
+                })),
+                ...metadata.forms.map((form) => buildAiIndexEntry({
+                    kind: "form",
+                    name: String(form.name ?? ""),
+                    notePath: formTargets.get(String(form.name ?? "")) ?? `forms/${sanitize(String(form.name ?? ""))}`,
+                    outgoing: noteDrafts.get(formTargets.get(String(form.name ?? "")) ?? `forms/${sanitize(String(form.name ?? ""))}`)?.outgoing ?? new Set<string>(),
+                    flags: deriveObjectFlags(warningsByObject.get(formTargets.get(String(form.name ?? "")) ?? `forms/${sanitize(String(form.name ?? ""))}`), !String(form.record_source ?? "").trim() ? ["recordsource-missing"] : []),
+                    recordSource: String(form.record_source ?? "") || undefined,
+                    procedures: Array.isArray(form.procedures) ? form.procedures.length : 0
+                })),
+                ...metadata.reports.map((report) => buildAiIndexEntry({
+                    kind: "report",
+                    name: String(report.name ?? ""),
+                    notePath: reportTargets.get(String(report.name ?? "")) ?? `reports/${sanitize(String(report.name ?? ""))}`,
+                    outgoing: noteDrafts.get(reportTargets.get(String(report.name ?? "")) ?? `reports/${sanitize(String(report.name ?? ""))}`)?.outgoing ?? new Set<string>(),
+                    flags: deriveObjectFlags(warningsByObject.get(reportTargets.get(String(report.name ?? "")) ?? `reports/${sanitize(String(report.name ?? ""))}`), []),
+                    recordSource: String(report.record_source ?? "") || undefined,
+                    procedures: Array.isArray(report.procedures) ? report.procedures.length : 0
+                })),
+                ...metadata.modules.map((module) => buildAiIndexEntry({
+                    kind: "module",
+                    name: String(module.name ?? ""),
+                    notePath: moduleTargets.get(String(module.name ?? "")) ?? `modules/${sanitize(String(module.name ?? ""))}`,
+                    outgoing: noteDrafts.get(moduleTargets.get(String(module.name ?? "")) ?? `modules/${sanitize(String(module.name ?? ""))}`)?.outgoing ?? new Set<string>(),
+                    flags: deriveObjectFlags(warningsByObject.get(moduleTargets.get(String(module.name ?? "")) ?? `modules/${sanitize(String(module.name ?? ""))}`), !(Array.isArray(module.procedures) ? module.procedures : []).length ? ["procedures-missing"] : []),
+                    recordSource: undefined,
+                    procedures: Array.isArray(module.procedures) ? module.procedures.length : 0
+                }))
+            ]
+        };
+        await fs.writeFile(path.join(vaultDir, "ai-index.json"), JSON.stringify(aiIndex, null, 2), "utf-8");
+        await this.reportProgress(options, {
+            phase: "write",
+            message: `ai-index.json escrito en ${formatDuration(Date.now() - aiIndexStartedAt)}`
+        });
+
+        const bodyWriteStartedAt = Date.now();
+        await Promise.all(bodyWrites);
+        await this.reportProgress(options, {
+            phase: "write",
+            message: `Cuerpos de notas escritos (${noteDrafts.size}) en ${formatDuration(Date.now() - bodyWriteStartedAt)}`
+        });
+
+        const backlinksStartedAt = Date.now();
         const incomingByTarget = new Map<string, Set<string>>();
         for (const [sourcePath, draft] of noteDrafts.entries()) {
             for (const target of draft.outgoing) {
@@ -1251,11 +1870,17 @@ export class SecondBrainService {
             }
         }
 
+        await this.reportProgress(options, {
+            phase: "write",
+            message: `Backlinks calculados en ${formatDuration(Date.now() - backlinksStartedAt)}`
+        });
+
+        const linksWriteStartedAt = Date.now();
         for (const [notePath, draft] of noteDrafts.entries()) {
             const outgoingSorted = Array.from(draft.outgoing).sort();
             const incomingSorted = Array.from(incomingByTarget.get(notePath) ?? []).sort();
 
-            draft.lines.push(
+            const linksSection = [
                 "",
                 "## Links",
                 "",
@@ -1265,10 +1890,15 @@ export class SecondBrainService {
                 "",
                 ...(incomingSorted.length > 0 ? incomingSorted.map((source) => `- ${wiki(source)}`) : ["- None"]),
                 ""
-            );
+            ].join("\n");
 
-            await fs.writeFile(path.join(vaultDir, `${notePath}.md`), draft.lines.join("\n"), "utf-8");
+            await fs.appendFile(path.join(vaultDir, `${notePath}.md`), `\n${linksSection}`, "utf-8");
         }
+
+        await this.reportProgress(options, {
+            phase: "write",
+            message: `Secciones de enlaces escritas en ${formatDuration(Date.now() - linksWriteStartedAt)}; total vault ${formatDuration(Date.now() - vaultStartedAt)}`
+        });
     }
 
     private async reportProgress(options: SecondBrainExportOptions | undefined, event: SecondBrainProgressEvent): Promise<void> {
@@ -1459,8 +2089,102 @@ function groupBy<T>(items: T[], keyGetter: (item: T) => string): Map<string, T[]
     return map;
 }
 
+function addToSetMap<K, V>(map: Map<K, Set<V>>, key: K, value: V): void {
+    if (!key) {
+        return;
+    }
+
+    const values = map.get(key) ?? new Set<V>();
+    values.add(value);
+    map.set(key, values);
+}
+
+function formatDuration(durationMs: number): string {
+    if (durationMs < 1000) {
+        return `${durationMs} ms`;
+    }
+
+    if (durationMs < 60000) {
+        return `${(durationMs / 1000).toFixed(1)} s`;
+    }
+
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = ((durationMs % 60000) / 1000).toFixed(1);
+    return `${minutes} min ${seconds} s`;
+}
+
+function isLikelyTimeoutError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes("timeout") || normalized.includes("timed out") || normalized.includes("supero el timeout");
+}
+
 function sanitize(value: string): string {
     return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+}
+
+function isLikelySubObjectName(name: string): boolean {
+    const normalized = name.trim().toLowerCase();
+    return normalized.startsWith("sub")
+        || normalized.startsWith("sf")
+        || normalized.includes(" unterformular")
+        || normalized.includes(" unterbericht")
+        || normalized.includes("subform")
+        || normalized.includes("subreport");
+}
+
+function collectWarningMatches<T>(
+    warningsByObject: Map<string, string[]>,
+    warning: string,
+    kind: string,
+    items: T[],
+    nameGetter: (item: T) => string
+): void {
+    const prefix = `${kind}:`;
+    const lowerWarning = warning.toLowerCase();
+    for (const item of items) {
+        const name = nameGetter(item);
+        if (!name) { continue; }
+        if (lowerWarning.includes(`${prefix}${name}`.toLowerCase())) {
+            const notePath = `${kind}/${sanitize(name)}`;
+            const warnings = warningsByObject.get(notePath) ?? [];
+            warnings.push(warning);
+            warningsByObject.set(notePath, warnings);
+        }
+    }
+}
+
+function deriveObjectFlags(warnings: string[] | undefined, extraFlags: string[]): string[] {
+    const flags = new Set(extraFlags);
+    for (const warning of warnings ?? []) {
+        const normalized = warning.toLowerCase();
+        if (normalized.includes("timeout")) { flags.add("timeout"); }
+        if (normalized.includes("no disponible") || normalized.includes("no se pudo")) { flags.add("partial"); }
+        if (normalized.includes("controles")) { flags.add("controls-unavailable"); }
+        if (normalized.includes("propiedades")) { flags.add("properties-unavailable"); }
+        if (normalized.includes("codigo") || normalized.includes("code")) { flags.add("code-unavailable"); }
+    }
+    return Array.from(flags).sort();
+}
+
+function buildAiIndexEntry(input: {
+    kind: string;
+    name: string;
+    notePath: string;
+    outgoing: Set<string>;
+    flags: string[];
+    recordSource?: string;
+    procedures: number;
+}): Record<string, unknown> {
+    return {
+        kind: input.kind,
+        name: input.name,
+        notePath: `${input.notePath}.md`,
+        outgoing: Array.from(input.outgoing).sort(),
+        flags: input.flags,
+        recordSource: input.recordSource,
+        procedures: input.procedures,
+        status: input.flags.length > 0 ? "partial" : "complete"
+    };
 }
 
 /** Repara doble encoding UTF-8 (latin1 interpretado como UTF-8). Ej: "Â·" -> "·" */

@@ -11,9 +11,15 @@ All notable changes to this project are documented in this file.
 - VBA entry points now accept `targetDbPath` as first argument and call `Application.OpenCurrentDatabase` to switch context before exporting.
 
 ## 1.0.18 - 2026-04-20
-
+## 1.0.20 - 2026-04-23
 - Hardened MCP-Access setup on Windows by preinstalling `cryptography` with `--only-binary :all:` to avoid source builds that require Rust/MSVC toolchains.
+- SecondBrain: retry automático por timeout con reconexión MCP antes de continuar; modo timeout agresivo (máx. 15 s por llamada) que se activa tras el primer fallo para evitar ciclos de espera largos.
+- SecondBrain: barra de progreso global — pre-listado de todos los objetos al inicio para que el porcentaje refleje el avance real sobre el total (no se reinicia por categoría).
+- SecondBrain: la carpeta de exportación recuerda la última elección por conexión y propone por defecto `<directorio del .accdb>/secondBrain/`.
+- SecondBrain: generación automática de documentos deterministas en el vault: `_entrypoints`, `_critical-objects`, `_known-issues`, `_reading-order`, `_ai-prompt` y `ai-index.json`.
 - Added automatic retry logic when dependency installation fails with common `cryptography` build errors (`link.exe`, `maturin`, wheel build failures).
+## 1.0.19 - 2026-04-20
+
 - Improved installation diagnostics with explicit Windows ARM64 guidance and a no-Git ZIP-based manual fallback.
 
 ## 1.0.14 - 2026-04-06
