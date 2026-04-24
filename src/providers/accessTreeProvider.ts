@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+    ActionNode,
     AccessTreeNode,
     CategoryNode,
     ConnectionNode,
@@ -7,7 +8,12 @@ import {
     MessageNode,
     ObjectNode
 } from "../models/treeNodes";
-import { ACCESS_CATEGORIES, AccessConnection } from "../models/types";
+import {
+    ACCESS_CATEGORIES,
+    ACCESS_CATEGORY_ACTIONS,
+    ACCESS_OBJECT_ACTIONS,
+    AccessConnection
+} from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
 import { ConnectionStore } from "../services/connectionStore";
 import { isAccessDatabaseOpenError, offerAccessRestart } from "../utils/accessRecovery";
@@ -52,6 +58,10 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
             return await this.getDetailChildren(element);
         }
 
+        if (element instanceof ActionNode) {
+            return [];
+        }
+
         return [];
     }
 
@@ -70,23 +80,27 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
         attempt = 0
     ): Promise<AccessTreeNode[]> {
         try {
+            const actionNodes = this.getCategoryActionNodes(connection, categoryKey);
+
             if (categoryKey === "relationships") {
                 const relationships = await this.mcpClient.listRelationships(connection);
-                return this.mapObjects(connection, categoryKey, relationships);
+                return [...actionNodes, ...this.mapObjects(connection, categoryKey, relationships)];
             }
 
             if (categoryKey === "references") {
                 const references = await this.mcpClient.listReferences(connection);
-                return this.mapObjects(connection, categoryKey, references);
+                return [...actionNodes, ...this.mapObjects(connection, categoryKey, references)];
             }
 
             const category = ACCESS_CATEGORIES.find((item) => item.key === categoryKey);
             if (!category?.toolObjectType) {
-                return [new MessageNode("Categoria no soportada.")];
+                return actionNodes.length > 0
+                    ? actionNodes
+                    : [new MessageNode("Categoria no soportada.")];
             }
 
             const objects = await this.mcpClient.listObjects(connection, category.toolObjectType);
-            return this.mapObjects(connection, categoryKey, objects);
+            return [...actionNodes, ...this.mapObjects(connection, categoryKey, objects)];
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
 
@@ -128,7 +142,8 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
             return [
                 new DetailNode(connection, categoryKey, objectInfo, "tableFieldsBranch", "Campos"),
                 new DetailNode(connection, categoryKey, objectInfo, "tableDataTableAction", "Datos (tabla, TOP 100)"),
-                new DetailNode(connection, categoryKey, objectInfo, "tableDataJsonAction", "Datos (JSON, TOP 100)")
+                new DetailNode(connection, categoryKey, objectInfo, "tableDataJsonAction", "Datos (JSON, TOP 100)"),
+                new DetailNode(connection, categoryKey, objectInfo, "tableManagementBranch", "Gestion")
             ];
         }
 
@@ -136,14 +151,16 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
             return [
                 new DetailNode(connection, categoryKey, objectInfo, "querySqlAction", "SQL"),
                 new DetailNode(connection, categoryKey, objectInfo, "queryRunTableAction", "Ejecutar (tabla, TOP 200)"),
-                new DetailNode(connection, categoryKey, objectInfo, "queryRunJsonAction", "Ejecutar (JSON, TOP 200)")
+                new DetailNode(connection, categoryKey, objectInfo, "queryRunJsonAction", "Ejecutar (JSON, TOP 200)"),
+                new DetailNode(connection, categoryKey, objectInfo, "queryManagementBranch", "Gestion")
             ];
         }
 
         if (categoryKey === "modules") {
             return [
                 new DetailNode(connection, categoryKey, objectInfo, "moduleProceduresBranch", "Procedimientos"),
-                new DetailNode(connection, categoryKey, objectInfo, "moduleCodeAction", "Codigo completo")
+                new DetailNode(connection, categoryKey, objectInfo, "moduleCodeAction", "Codigo completo"),
+                new DetailNode(connection, categoryKey, objectInfo, "moduleManagementBranch", "Gestion")
             ];
         }
 
@@ -204,6 +221,14 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                         description
                     );
                 });
+            }
+
+            if (node.detailKind === "queryManagementBranch" || node.detailKind === "moduleManagementBranch") {
+                return this.getObjectActionNodes(node.connection, node.categoryKey, node.objectInfo);
+            }
+
+            if (node.detailKind === "tableManagementBranch") {
+                return this.getObjectActionNodes(node.connection, node.categoryKey, node.objectInfo);
             }
 
             if (node.detailKind === "moduleProceduresBranch") {
@@ -433,6 +458,27 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
 
             return [new MessageNode(`Error: ${message}`)];
         }
+    }
+
+    private getCategoryActionNodes(
+        connection: AccessConnection,
+        categoryKey: CategoryNode["categoryKey"]
+    ): ActionNode[] {
+        const actions = ACCESS_CATEGORY_ACTIONS[categoryKey] ?? [];
+        return actions.map((action) => new ActionNode(connection, categoryKey, action));
+    }
+
+    private getObjectActionNodes(
+        connection: AccessConnection,
+        categoryKey: CategoryNode["categoryKey"],
+        objectInfo: ObjectNode["objectInfo"]
+    ): AccessTreeNode[] {
+        const actions = ACCESS_OBJECT_ACTIONS[categoryKey] ?? [];
+        if (actions.length === 0) {
+            return [new MessageNode("Sin acciones disponibles.")];
+        }
+
+        return actions.map((action) => new ActionNode(connection, categoryKey, action, objectInfo));
     }
 
     async findControlNode(

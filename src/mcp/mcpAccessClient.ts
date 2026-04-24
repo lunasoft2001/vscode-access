@@ -734,7 +734,11 @@ export class McpAccessClient {
             const payload = await this.callTool("compile_vba", {
                 db_path: connection.dbPath
             }, 120000);
-            return this.extractText(payload) || JSON.stringify(payload);
+            const summary = this.summarizeCompileResult(payload);
+            if (summary.status !== "compiled") {
+                throw new Error(summary.message);
+            }
+            return summary.message;
         } finally {
             await this.restoreAccessAlerts(connection);
         }
@@ -780,8 +784,8 @@ export class McpAccessClient {
         connection: AccessConnection,
         expression: string,
         timeoutOverrideMs?: number
-    ): Promise<void> {
-        await this.callTool("eval_vba", {
+    ): Promise<unknown> {
+        return await this.callTool("eval_vba", {
             db_path: connection.dbPath,
             expression
         }, timeoutOverrideMs);
@@ -792,7 +796,7 @@ export class McpAccessClient {
         procedure: string,
         args: unknown[] = [],
         timeoutOverrideMs?: number
-    ): Promise<void> {
+    ): Promise<unknown> {
         const timeoutSeconds =
             typeof timeoutOverrideMs === "number"
                 ? Math.max(1, Math.ceil(timeoutOverrideMs / 1000))
@@ -808,7 +812,7 @@ export class McpAccessClient {
             payload.timeout = timeoutSeconds;
         }
 
-        await this.callTool("run_vba", payload, timeoutOverrideMs);
+        return await this.callTool("run_vba", payload, timeoutOverrideMs);
     }
 
     /**
@@ -827,15 +831,55 @@ export class McpAccessClient {
         connection: AccessConnection,
         moduleName: string,
         timeoutOverrideMs?: number
+    ): Promise<string> {
+        await this.suppressAccessAlerts(connection);
+        try {
+            await this.callTool("vbe_replace_lines", {
+                db_path: connection.dbPath,
+                object_type: "module",
+                object_name: moduleName,
+                start_line: 1,
+                count: 0,
+                new_code: ""
+            }, timeoutOverrideMs);
+
+            const payload = await this.callTool("compile_vba", {
+                db_path: connection.dbPath
+            }, Math.max(timeoutOverrideMs ?? 30000, 120000));
+
+            const summary = this.summarizeCompileResult(payload);
+            if (summary.status !== "compiled") {
+                throw new Error(summary.message);
+            }
+
+            return summary.message;
+        } finally {
+            await this.restoreAccessAlerts(connection);
+        }
+    }
+
+    async replaceCodeLines(
+        connection: AccessConnection,
+        objectType: "module" | "form" | "report",
+        objectName: string,
+        startLine: number,
+        count: number,
+        newCode: string,
+        timeoutOverrideMs?: number
     ): Promise<void> {
-        await this.callTool("vbe_replace_lines", {
-            db_path: connection.dbPath,
-            object_type: "module",
-            object_name: moduleName,
-            start_line: 1,
-            count: 0,
-            new_code: ""
-        }, timeoutOverrideMs);
+        await this.suppressAccessAlerts(connection);
+        try {
+            await this.callTool("vbe_replace_lines", {
+                db_path: connection.dbPath,
+                object_type: objectType,
+                object_name: objectName,
+                start_line: startLine,
+                count,
+                new_code: newCode
+            }, timeoutOverrideMs);
+        } finally {
+            await this.restoreAccessAlerts(connection);
+        }
     }
 
     /**
@@ -2026,6 +2070,66 @@ export class McpAccessClient {
         }
 
         return this.stringifyPayload(payload);
+    }
+
+    private summarizeCompileResult(payload: any): { status: string; message: string } {
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+            if (status === "compiled") {
+                return {
+                    status,
+                    message: "Compilacion correcta."
+                };
+            }
+
+            const parts: string[] = [];
+            if (typeof payload.error_detail === "string" && payload.error_detail.trim()) {
+                parts.push(payload.error_detail.trim());
+            }
+
+            if (payload.error_location && typeof payload.error_location === "object") {
+                const moduleName = typeof payload.error_location.module === "string"
+                    ? payload.error_location.module.trim()
+                    : "";
+                const procName = typeof payload.error_location.proc === "string"
+                    ? payload.error_location.proc.trim()
+                    : "";
+                const line = payload.error_location.line;
+
+                const locationParts = [
+                    moduleName ? `Modulo: ${moduleName}` : "",
+                    procName ? `Procedimiento: ${procName}` : "",
+                    typeof line === "number" ? `Linea: ${line}` : ""
+                ].filter(Boolean);
+
+                if (locationParts.length > 0) {
+                    parts.push(locationParts.join(" | "));
+                }
+            }
+
+            if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+                const details = payload.errors
+                    .slice(0, 10)
+                    .map((item: any) => {
+                        const moduleName = typeof item?.module === "string" ? item.module : "Modulo";
+                        const line = typeof item?.line === "number" ? ` linea ${item.line}` : "";
+                        const error = typeof item?.error === "string" ? item.error : this.stringifyPayload(item);
+                        return `${moduleName}${line}: ${error}`;
+                    });
+                parts.push(details.join("\n"));
+            }
+
+            return {
+                status: status || "error",
+                message: parts.join("\n\n").trim() || this.stringifyPayload(payload)
+            };
+        }
+
+        const text = this.extractText(payload) || this.stringifyPayload(payload) || "Resultado de compilacion desconocido.";
+        return {
+            status: /compiled/i.test(text) && !/error/i.test(text) ? "compiled" : "error",
+            message: text
+        };
     }
 
     private extractCode(payload: any): string {

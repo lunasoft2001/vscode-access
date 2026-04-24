@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.0.21",
+    "version": "1.1.0",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
@@ -39,6 +39,21 @@
         "onCommand:accessExplorer.openSqlEditor",
         "onCommand:accessExplorer.pickSqlConnection",
         "onCommand:accessExplorer.saveCodeToAccess",
+        "onCommand:accessExplorer.saveModuleToAccess",
+        "onCommand:accessExplorer.toggleVbComment",
+        "onCommand:accessExplorer.createModule",
+        "onCommand:accessExplorer.deleteModule",
+        "onCommand:accessExplorer.compileModule",
+        "onCommand:accessExplorer.newQuery",
+        "onCommand:accessExplorer.createTableDesigner",
+        "onCommand:accessExplorer.editTableDesigner",
+        "onCommand:accessExplorer.createTableDdl",
+        "onCommand:accessExplorer.editTableDdl",
+        "onCommand:accessExplorer.saveQueryToAccess",
+        "onCommand:accessExplorer.deleteQuery",
+        "onCommand:accessExplorer.openVbaConsole",
+        "onCommand:accessExplorer.createDatabase",
+        "onCommand:accessExplorer.closeAccess",
         "onCommand:accessExplorer.compileVba",
         "onCommand:accessExplorer.compactRepair",
         "onCommand:accessExplorer.secondBrain.full",
@@ -138,6 +153,81 @@
                 "icon": "$(cloud-upload)"
             },
             {
+                "command": "accessExplorer.saveModuleToAccess",
+                "title": "%command.saveModuleToAccess.title%",
+                "icon": "$(cloud-upload)"
+            },
+            {
+                "command": "accessExplorer.toggleVbComment",
+                "title": "%command.toggleVbComment.title%",
+                "icon": "$(comment-discussion)"
+            },
+            {
+                "command": "accessExplorer.createModule",
+                "title": "%command.createModule.title%",
+                "icon": "$(file-code)"
+            },
+            {
+                "command": "accessExplorer.deleteModule",
+                "title": "%command.deleteModule.title%",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "accessExplorer.compileModule",
+                "title": "%command.compileModule.title%",
+                "icon": "$(check)"
+            },
+            {
+                "command": "accessExplorer.newQuery",
+                "title": "%command.newQuery.title%",
+                "icon": "$(new-file)"
+            },
+            {
+                "command": "accessExplorer.createTableDesigner",
+                "title": "%command.createTableDesigner.title%",
+                "icon": "$(edit-session)"
+            },
+            {
+                "command": "accessExplorer.editTableDesigner",
+                "title": "%command.editTableDesigner.title%",
+                "icon": "$(edit-session)"
+            },
+            {
+                "command": "accessExplorer.createTableDdl",
+                "title": "%command.createTableDdl.title%",
+                "icon": "$(table)"
+            },
+            {
+                "command": "accessExplorer.editTableDdl",
+                "title": "%command.editTableDdl.title%",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "accessExplorer.saveQueryToAccess",
+                "title": "%command.saveQueryToAccess.title%",
+                "icon": "$(cloud-upload)"
+            },
+            {
+                "command": "accessExplorer.deleteQuery",
+                "title": "%command.deleteQuery.title%",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "accessExplorer.openVbaConsole",
+                "title": "%command.openVbaConsole.title%",
+                "icon": "$(terminal)"
+            },
+            {
+                "command": "accessExplorer.createDatabase",
+                "title": "%command.createDatabase.title%",
+                "icon": "$(database)"
+            },
+            {
+                "command": "accessExplorer.closeAccess",
+                "title": "%command.closeAccess.title%",
+                "icon": "$(debug-disconnect)"
+            },
+            {
                 "command": "accessExplorer.compileVba",
                 "title": "%command.compileVba.title%",
                 "icon": "$(check)"
@@ -211,9 +301,39 @@
                     "group": "navigation@7"
                 },
                 {
-                    "command": "accessExplorer.secondBrain.full",
+                    "command": "accessExplorer.newQuery",
                     "when": "view == accessExplorerView",
                     "group": "navigation@8"
+                },
+                {
+                    "command": "accessExplorer.createTableDesigner",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@9"
+                },
+                {
+                    "command": "accessExplorer.createTableDdl",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@10"
+                },
+                {
+                    "command": "accessExplorer.createModule",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@11"
+                },
+                {
+                    "command": "accessExplorer.openVbaConsole",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@12"
+                },
+                {
+                    "command": "accessExplorer.createDatabase",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@13"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@14"
                 }
             ],
             "editor/title": [
@@ -228,9 +348,29 @@
                     "group": "navigation@2"
                 },
                 {
-                    "command": "accessExplorer.saveCodeToAccess",
+                    "command": "accessExplorer.saveModuleToAccess",
                     "when": "editorLangId == vb",
                     "group": "navigation@1"
+                },
+                {
+                    "command": "accessExplorer.compileModule",
+                    "when": "editorLangId == vb",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "accessExplorer.toggleVbComment",
+                    "when": "editorLangId == vb",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "accessExplorer.saveQueryToAccess",
+                    "when": "accessExplorer.canSaveQuery",
+                    "group": "navigation@4"
+                },
+                {
+                    "command": "accessExplorer.saveCodeToAccess",
+                    "when": "accessExplorer.canSaveCode && !accessExplorer.canSaveModule",
+                    "group": "navigation@5"
                 }
             ],
             "view/item/context": [
@@ -259,22 +399,87 @@
                     "group": "1_actions@2"
                 },
                 {
-                    "command": "accessExplorer.secondBrain.full",
+                    "command": "accessExplorer.newQuery",
                     "when": "view == accessExplorerView && viewItem == accessConnection",
                     "group": "1_actions@3"
                 },
                 {
-                    "command": "accessExplorer.secondBrain.category",
-                    "when": "view == accessExplorerView && viewItem == accessCategory",
+                    "command": "accessExplorer.createModule",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@4"
+                },
+                {
+                    "command": "accessExplorer.openVbaConsole",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@5"
+                },
+                {
+                    "command": "accessExplorer.closeAccess",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@6"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@7"
+                },
+                {
+                    "command": "accessExplorer.createTableDesigner",
+                    "when": "view == accessExplorerView && viewItem == accessTableCategory",
                     "group": "2_actions@1"
                 },
                 {
+                    "command": "accessExplorer.createTableDdl",
+                    "when": "view == accessExplorerView && viewItem == accessTableCategory",
+                    "group": "2_actions@2"
+                },
+                {
+                    "command": "accessExplorer.newQuery",
+                    "when": "view == accessExplorerView && viewItem == accessQueryCategory",
+                    "group": "2_actions@1"
+                },
+                {
+                    "command": "accessExplorer.createModule",
+                    "when": "view == accessExplorerView && viewItem == accessModuleCategory",
+                    "group": "2_actions@1"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.category",
+                    "when": "view == accessExplorerView && (viewItem == accessCategory || viewItem == accessTableCategory || viewItem == accessQueryCategory || viewItem == accessModuleCategory)",
+                    "group": "2_actions@1"
+                },
+                {
+                    "command": "accessExplorer.editTableDesigner",
+                    "when": "view == accessExplorerView && viewItem == accessTableObject",
+                    "group": "2_actions@1"
+                },
+                {
+                    "command": "accessExplorer.editTableDdl",
+                    "when": "view == accessExplorerView && viewItem == accessTableObject",
+                    "group": "2_actions@2"
+                },
+                {
+                    "command": "accessExplorer.compileModule",
+                    "when": "view == accessExplorerView && viewItem == accessModuleObject",
+                    "group": "2_actions@1"
+                },
+                {
+                    "command": "accessExplorer.deleteModule",
+                    "when": "view == accessExplorerView && viewItem == accessModuleObject",
+                    "group": "2_actions@2"
+                },
+                {
+                    "command": "accessExplorer.deleteQuery",
+                    "when": "view == accessExplorerView && viewItem == accessQueryObject",
+                    "group": "2_actions@2"
+                },
+                {
                     "command": "accessExplorer.showDetails",
-                    "when": "view == accessExplorerView && viewItem == accessObject"
+                    "when": "view == accessExplorerView && (viewItem == accessObject || viewItem == accessTableObject || viewItem == accessModuleObject || viewItem == accessQueryObject)"
                 },
                 {
                     "command": "accessExplorer.secondBrain.object",
-                    "when": "view == accessExplorerView && viewItem == accessObject",
+                    "when": "view == accessExplorerView && (viewItem == accessObject || viewItem == accessTableObject || viewItem == accessModuleObject || viewItem == accessQueryObject)",
                     "group": "2_actions@2"
                 }
             ]

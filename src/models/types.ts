@@ -28,6 +28,10 @@ export interface AccessObjectDocument {
         connection: AccessConnection;
         objectType: "module" | "form" | "report";
         objectName: string;
+        procedureName?: string;
+        replaceStartLine?: number;
+        replaceCount?: number;
+        isNew?: boolean;
     };
 }
 
@@ -81,6 +85,103 @@ export interface AccessCategory {
     label: string;
     toolObjectType?: string;
 }
+
+export type AccessTreeActionKind =
+    | "createTableDesigner"
+    | "editTableDesigner"
+    | "createTableDdl"
+    | "editTableDdl"
+    | "createModule"
+    | "deleteModule"
+    | "compileModule"
+    | "newQuery"
+    | "saveQueryToAccess"
+    | "deleteQuery";
+
+export interface AccessTreeActionDefinition {
+    kind: AccessTreeActionKind;
+    label: string;
+    command: string;
+    description?: string;
+}
+
+export const ACCESS_CATEGORY_ACTIONS: Partial<Record<AccessCategoryKey, AccessTreeActionDefinition[]>> = {
+    tables: [
+        {
+            kind: "createTableDesigner",
+            label: "Nueva tabla guiada...",
+            command: "accessExplorer.createTableDesigner",
+            description: "Abrir un diseñador guiado para crear una tabla"
+        },
+        {
+            kind: "createTableDdl",
+            label: "Nueva tabla DDL...",
+            command: "accessExplorer.createTableDdl",
+            description: "Abrir una plantilla SQL DDL para crear una tabla"
+        }
+    ],
+    modules: [
+        {
+            kind: "createModule",
+            label: "Nuevo modulo...",
+            command: "accessExplorer.createModule",
+            description: "Crear un modulo VBA"
+        }
+    ],
+    queries: [
+        {
+            kind: "newQuery",
+            label: "Nueva consulta guardada...",
+            command: "accessExplorer.newQuery",
+            description: "Abrir un editor SQL para una consulta guardada de Access"
+        }
+    ]
+};
+
+export const ACCESS_OBJECT_ACTIONS: Partial<Record<AccessCategoryKey, AccessTreeActionDefinition[]>> = {
+    tables: [
+        {
+            kind: "editTableDesigner",
+            label: "Editar tabla guiada...",
+            command: "accessExplorer.editTableDesigner",
+            description: "Abrir un diseñador guiado para modificar esta tabla"
+        },
+        {
+            kind: "editTableDdl",
+            label: "Editar tabla DDL...",
+            command: "accessExplorer.editTableDdl",
+            description: "Abrir una plantilla SQL DDL para modificar esta tabla"
+        }
+    ],
+    modules: [
+        {
+            kind: "compileModule",
+            label: "Compilar modulo",
+            command: "accessExplorer.compileModule",
+            description: "Compilar solo este modulo"
+        },
+        {
+            kind: "deleteModule",
+            label: "Eliminar modulo",
+            command: "accessExplorer.deleteModule",
+            description: "Eliminar este modulo VBA"
+        }
+    ],
+    queries: [
+        {
+            kind: "saveQueryToAccess",
+            label: "Guardar consulta en Access",
+            command: "accessExplorer.saveQueryToAccess",
+            description: "Guardar el SQL editado como QueryDef"
+        },
+        {
+            kind: "deleteQuery",
+            label: "Eliminar consulta",
+            command: "accessExplorer.deleteQuery",
+            description: "Eliminar esta consulta guardada"
+        }
+    ]
+};
 
 export const ACCESS_CATEGORIES: AccessCategory[] = [
     { key: "tables", label: "Tablas", toolObjectType: "table" },

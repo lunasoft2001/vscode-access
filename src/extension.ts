@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+﻿import * as vscode from "vscode";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
@@ -10,6 +10,7 @@ import { SecondBrainService } from "./services/secondBrainService";
 import { BulkExportService } from "./services/bulkExportService";
 import { ExportObjectsService } from "./services/exportObjectsService";
 import { offerAccessRestart, restartAccessProcesses } from "./utils/accessRecovery";
+import { rt } from "./utils/runtimeL10n";
 
 export function activate(context: vscode.ExtensionContext): void {
     const configuration = () => vscode.workspace.getConfiguration("accessExplorer");
@@ -21,7 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const treeProvider = new AccessTreeProvider(connectionStore, mcpClient);
     const secondBrainOutput = vscode.window.createOutputChannel("Access Explorer SecondBrain");
     const secondBrainStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-    secondBrainStatusBar.tooltip = "Estado de generación de SecondBrain";
+    secondBrainStatusBar.tooltip = rt("secondBrain.status.tooltip");
 
     context.subscriptions.push(mcpClient);
     context.subscriptions.push(secondBrainOutput, secondBrainStatusBar);
@@ -31,21 +32,41 @@ export function activate(context: vscode.ExtensionContext): void {
         connection: import("./models/types").AccessConnection;
         objectType: "module" | "form" | "report";
         objectName: string;
+        procedureName?: string;
+        replaceStartLine?: number;
+        replaceCount?: number;
+        isNew?: boolean;
+    }
+    interface AccessQueryMeta {
+        connection: import("./models/types").AccessConnection;
+        queryName?: string;
+        isNew?: boolean;
+    }
+    interface TableDesignerFieldDraft {
+        originalName?: string;
+        name: string;
+        type: string;
+        size?: number;
+        required: boolean;
+        existing?: boolean;
     }
     const codeDocuments = new Map<string, AccessCodeMeta>();
+    const queryDocuments = new Map<string, AccessQueryMeta>();
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
             codeDocuments.delete(doc.uri.toString());
+            queryDocuments.delete(doc.uri.toString());
+            void updateEditorActionContexts();
         })
     );
 
     context.subscriptions.push(mcpClient);
 
-    // Status bar item: muestra la conexión activa para el editor SQL
+    // Status bar item: shows the active connection for the SQL editor
     let activeSqlConnection: import("./models/types").AccessConnection | undefined;
     const sqlStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     sqlStatusBar.command = "accessExplorer.pickSqlConnection";
-    sqlStatusBar.tooltip = "Selecciona la conexión Access para el editor SQL";
+    sqlStatusBar.tooltip = rt("sql.status.tooltip");
 
     function updateSqlStatusBar(): void {
         const editor = vscode.window.activeTextEditor;
@@ -53,16 +74,62 @@ export function activate(context: vscode.ExtensionContext): void {
         if (isSql) {
             sqlStatusBar.text = activeSqlConnection
                 ? `$(database) ${activeSqlConnection.name}`
-                : `$(database) Conectar Access…`;
+                : `$(database) Conectar Access...`;
             sqlStatusBar.show();
         } else {
             sqlStatusBar.hide();
         }
     }
 
+    async function updateEditorActionContexts(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        const key = editor?.document.uri.toString();
+        const codeMeta = key ? codeDocuments.get(key) : undefined;
+        const canSaveCode = !!codeMeta;
+        const canSaveModule = codeMeta?.objectType === "module";
+
+        await vscode.commands.executeCommand("setContext", "accessExplorer.canSaveCode", canSaveCode);
+        await vscode.commands.executeCommand("setContext", "accessExplorer.canSaveModule", canSaveModule);
+        await vscode.commands.executeCommand("setContext", "accessExplorer.canSaveQuery", !!key && queryDocuments.has(key));
+        updateSqlStatusBar();
+    }
+
+    function trackCodeDocument(
+        document: vscode.TextDocument,
+        meta: AccessCodeMeta
+    ): void {
+        codeDocuments.set(document.uri.toString(), meta);
+        void updateEditorActionContexts();
+    }
+
+    function trackQueryDocument(
+        document: vscode.TextDocument,
+        meta: AccessQueryMeta
+    ): void {
+        queryDocuments.set(document.uri.toString(), meta);
+        activeSqlConnection = meta.connection;
+        void updateEditorActionContexts();
+    }
+
+    function getActiveSqlMeta(editor: vscode.TextEditor | undefined): {
+        document: vscode.TextDocument;
+        meta?: AccessQueryMeta;
+    } | undefined {
+        if (!editor || editor.document.languageId !== "sql") {
+            return undefined;
+        }
+
+        return {
+            document: editor.document,
+            meta: queryDocuments.get(editor.document.uri.toString())
+        };
+    }
+
     context.subscriptions.push(sqlStatusBar);
-    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => updateSqlStatusBar()));
-    updateSqlStatusBar();
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
+        void updateEditorActionContexts();
+    }));
+    void updateEditorActionContexts();
 
     const treeView = vscode.window.createTreeView("accessExplorerView", {
         treeDataProvider: treeProvider,
@@ -83,7 +150,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 treeProvider.refresh();
                 await registerMcpServerSilently(context, mcpClient);
             } catch {
-                // El cliente ya muestra diagnóstico y pasos de corrección.
+                // The client already shows diagnostics and recovery guidance.
             }
         }
     );
@@ -102,7 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
                         }
                     });
                 } else {
-                    vscode.window.showInformationMessage("El servidor MCP ya estaba registrado y está actualizado.");
+                    vscode.window.showInformationMessage(rt("sql.connection.alreadyRegisteredUpdated"));
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -245,7 +312,7 @@ export function activate(context: vscode.ExtensionContext): void {
                                     for (const object of objects) {
                                         items.push({
                                             label: object.name,
-                                            description: `${connection.name} · ${category.label}`,
+                                            description: `${connection.name}${rt("object.descriptionSeparator")}${category.label}`,
                                             detail: connection.dbPath,
                                             node: new ObjectNode(connection, category.key, object)
                                         });
@@ -258,7 +325,7 @@ export function activate(context: vscode.ExtensionContext): void {
                                     for (const object of objects) {
                                         items.push({
                                             label: object.name,
-                                            description: `${connection.name} · ${category.label}`,
+                                            description: `${connection.name}${rt("object.descriptionSeparator")}${category.label}`,
                                             detail: connection.dbPath,
                                             node: new ObjectNode(connection, category.key, object)
                                         });
@@ -274,7 +341,7 @@ export function activate(context: vscode.ExtensionContext): void {
                                 for (const object of objects) {
                                     items.push({
                                         label: object.name,
-                                        description: `${connection.name} · ${category.label}`,
+                                        description: `${connection.name}${rt("object.descriptionSeparator")}${category.label}`,
                                         detail: connection.dbPath,
                                         node: new ObjectNode(connection, category.key, object)
                                     });
@@ -422,11 +489,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
                 // Track for "Save to Access"
                 if (objectDoc.language === "vb" && "codeMeta" in objectDoc) {
-                    const meta = (objectDoc as any).codeMeta as AccessCodeMeta;
-                    codeDocuments.set(doc.uri.toString(), meta);
+                    const meta = { ...((objectDoc as any).codeMeta as AccessCodeMeta) };
+                    if (
+                        (meta.objectType === "form" || meta.objectType === "report")
+                        && typeof meta.replaceStartLine !== "number"
+                    ) {
+                        meta.replaceStartLine = 1;
+                        meta.replaceCount = doc.lineCount;
+                    }
+                    trackCodeDocument(doc, meta);
+                }
+
+                if (objectDoc.language === "sql" && node.categoryKey === "queries") {
+                    trackQueryDocument(doc, {
+                        connection: node.connection,
+                        queryName: node.objectInfo.name
+                    });
                 }
 
                 await vscode.window.showTextDocument(doc, { preview: true });
+                await updateEditorActionContexts();
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 const recovered = await offerAccessRestart(message);
@@ -457,6 +539,753 @@ export function activate(context: vscode.ExtensionContext): void {
         return pick?.connection;
     }
 
+    async function pickObjectFromCategory(
+        connection: import("./models/types").AccessConnection,
+        objectType: "module" | "query" | "table",
+        title: string
+    ): Promise<string | undefined> {
+        const objects = await mcpClient.listObjects(connection, objectType);
+        if (objects.length === 0) {
+            const objectLabel = objectType === "module"
+                ? "modulos"
+                : objectType === "query"
+                    ? "consultas"
+                    : "tablas";
+            vscode.window.showInformationMessage(`No hay ${objectLabel} en ${connection.name}.`);
+            return undefined;
+        }
+
+        const pick = await vscode.window.showQuickPick(
+            objects
+                .slice()
+                .sort((left, right) => left.name.localeCompare(right.name, "es"))
+                .map((object) => ({
+                    label: object.name,
+                    objectName: object.name
+                })),
+            { title }
+        );
+
+        return pick?.objectName;
+    }
+
+    function escapeVbaStringLiteral(value: string): string {
+        return value.replaceAll("\"", "\"\"");
+    }
+
+    function toVbaStringExpression(value: string): string {
+        const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+        if (lines.length === 0) {
+            return "\"\"";
+        }
+
+        return lines
+            .map((line) => `"${escapeVbaStringLiteral(line)}"`)
+            .join(" & vbCrLf & ");
+    }
+
+    async function saveQueryDocumentToAccess(
+        editor: vscode.TextEditor,
+        explicitQueryName?: string
+    ): Promise<void> {
+        const activeSql = getActiveSqlMeta(editor);
+        if (!activeSql) {
+            vscode.window.showInformationMessage("No hay un editor SQL activo.");
+            return;
+        }
+
+        const trackedMeta = activeSql.meta;
+        const connection = trackedMeta?.connection
+            ?? activeSqlConnection
+            ?? await pickConnection("Seleccionar base de datos Access para guardar la consulta");
+
+        if (!connection) {
+            return;
+        }
+
+        activeSqlConnection = connection;
+        updateSqlStatusBar();
+
+        const queryName = explicitQueryName
+            ?? await vscode.window.showInputBox({
+                prompt: "Nombre de la consulta en Access",
+                value: trackedMeta?.queryName ?? "",
+                validateInput: (value) => (value.trim() ? undefined : "El nombre es obligatorio")
+            });
+
+        if (!queryName?.trim()) {
+            return;
+        }
+
+        const finalQueryName = queryName.trim();
+        const sql = editor.document.getText();
+        if (!sql.trim()) {
+            vscode.window.showWarningMessage(rt("query.sql.empty"));
+            return;
+        }
+
+        const escapedQueryName = escapeVbaStringLiteral(finalQueryName);
+        const sqlExpression = toVbaStringExpression(sql);
+        const expression = [
+            "Dim db As DAO.Database",
+            "Dim qdf As DAO.QueryDef",
+            "Set db = CurrentDb()",
+            "On Error Resume Next",
+            `Set qdf = db.QueryDefs("${escapedQueryName}")`,
+            "If Err.Number <> 0 Then",
+            "    Err.Clear",
+            `    Set qdf = db.CreateQueryDef("${escapedQueryName}", ${sqlExpression})`,
+            "Else",
+            `    qdf.SQL = ${sqlExpression}`,
+            "End If",
+            "On Error GoTo 0"
+        ].join("\n");
+
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `Guardando consulta ${finalQueryName}...`,
+                cancellable: false
+            },
+            () => mcpClient.evalVba(connection, expression, 30000)
+        );
+
+        trackQueryDocument(editor.document, {
+            connection,
+            queryName: finalQueryName
+        });
+
+        vscode.window.showInformationMessage(`Consulta guardada en Access: ${finalQueryName}`);
+        treeProvider.refresh();
+    }
+
+    async function openNewQueryEditor(
+        connection: import("./models/types").AccessConnection,
+        initialSql = "",
+        queryName?: string
+    ): Promise<void> {
+        const doc = await vscode.workspace.openTextDocument({
+            language: "sql",
+            content: initialSql
+        });
+        trackQueryDocument(doc, { connection, queryName, isNew: !queryName });
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    function quoteSqlIdentifier(value: string): string {
+        return `[${value.replaceAll("]", "]]")}]`;
+    }
+
+    function toAccessFieldTypeSql(field: import("./models/types").AccessTableFieldInfo): string {
+        const rawType = String(field.type ?? "TEXT").trim();
+        const normalized = rawType.toUpperCase();
+        const supportsSize = /^(TEXT|CHAR|VARCHAR|VARBINARY|BINARY)$/i.test(normalized);
+        const sizeSuffix = supportsSize && typeof field.size === "number" && field.size > 0
+            ? `(${field.size})`
+            : "";
+        return `${rawType}${sizeSuffix}`;
+    }
+
+    function getNextAvailableFieldName(fields: import("./models/types").AccessTableFieldInfo[]): string {
+        const existingNames = new Set(
+            fields
+                .map((field) => String(field.name ?? "").trim().toLowerCase())
+                .filter(Boolean)
+        );
+        const baseName = "NuevoCampo";
+        let counter = 1;
+        let candidate = baseName;
+        while (existingNames.has(candidate.toLowerCase())) {
+            counter += 1;
+            candidate = `${baseName}${counter}`;
+        }
+        return candidate;
+    }
+
+    function buildCreateTableDdlTemplate(tableName: string): string {
+        const quotedName = quoteSqlIdentifier(tableName || "NuevaTabla");
+        return [
+            `CREATE TABLE ${quotedName} (`,
+            "    [Id] AUTOINCREMENT PRIMARY KEY,",
+            "    [Nombre] TEXT(255) NOT NULL",
+            ");"
+        ].join("\n");
+    }
+
+    function buildEditTableDdlTemplate(
+        tableName: string,
+        fields: import("./models/types").AccessTableFieldInfo[]
+    ): string {
+        return buildAddColumnDdlTemplate(tableName, fields);
+    }
+
+    function buildAddColumnDdlTemplate(
+        tableName: string,
+        fields: import("./models/types").AccessTableFieldInfo[]
+    ): string {
+        const quotedTableName = quoteSqlIdentifier(tableName);
+        const candidate = getNextAvailableFieldName(fields);
+
+        return [
+            `ALTER TABLE ${quotedTableName}`,
+            `ADD COLUMN ${quoteSqlIdentifier(candidate)} TEXT(100);`
+        ].join("\n");
+    }
+
+    function buildAlterColumnDdlTemplate(
+        tableName: string,
+        field: import("./models/types").AccessTableFieldInfo
+    ): string {
+        const quotedTableName = quoteSqlIdentifier(tableName);
+        const quotedFieldName = quoteSqlIdentifier(field.name);
+        return [
+            `ALTER TABLE ${quotedTableName}`,
+            `ALTER COLUMN ${quotedFieldName} ${toAccessFieldTypeSql(field)};`
+        ].join("\n");
+    }
+
+    function buildDropColumnDdlTemplate(tableName: string, fieldName: string): string {
+        const quotedTableName = quoteSqlIdentifier(tableName);
+        return [
+            `ALTER TABLE ${quotedTableName}`,
+            `DROP COLUMN ${quoteSqlIdentifier(fieldName)};`
+        ].join("\n");
+    }
+
+    async function pickTableField(
+        fields: import("./models/types").AccessTableFieldInfo[],
+        title: string
+    ): Promise<import("./models/types").AccessTableFieldInfo | undefined> {
+        if (fields.length === 0) {
+            vscode.window.showWarningMessage("La tabla no tiene campos disponibles para esta operacion.");
+            return undefined;
+        }
+
+        const pick = await vscode.window.showQuickPick(
+            fields.map((field) => ({
+                label: field.name,
+                description: [
+                    field.type ?? "",
+                    typeof field.size === "number" ? `(${field.size})` : "",
+                    field.required ? "required" : "optional"
+                ].filter(Boolean).join(" "),
+                field
+            })),
+            { title }
+        );
+
+        return pick?.field;
+    }
+
+    function normalizeFieldType(value: string): string {
+        return value.trim().toUpperCase();
+    }
+
+    function buildFieldTypeClause(field: TableDesignerFieldDraft): string {
+        const type = normalizeFieldType(field.type || "TEXT");
+        const supportsSize = /^(TEXT|CHAR|VARCHAR|VARBINARY|BINARY)$/i.test(type);
+        const size = supportsSize && typeof field.size === "number" && field.size > 0
+            ? `(${field.size})`
+            : "";
+        return `${type}${size}`;
+    }
+
+    function buildCreateTableFieldDefinition(field: TableDesignerFieldDraft): string {
+        const type = normalizeFieldType(field.type || "TEXT");
+        const nullability = field.required ? " NOT NULL" : "";
+        if (type === "AUTOINCREMENT") {
+            return `${quoteSqlIdentifier(field.name)} AUTOINCREMENT${nullability}`;
+        }
+        return `${quoteSqlIdentifier(field.name)} ${buildFieldTypeClause(field)}${nullability}`;
+    }
+
+    function sanitizeTableDesignerFields(fields: TableDesignerFieldDraft[]): TableDesignerFieldDraft[] {
+        return fields
+            .map((field) => ({
+                ...field,
+                name: String(field.name ?? "").trim(),
+                type: normalizeFieldType(String(field.type ?? "TEXT")),
+                size: typeof field.size === "number" && Number.isFinite(field.size) && field.size > 0
+                    ? Math.trunc(field.size)
+                    : undefined,
+                required: Boolean(field.required)
+            }))
+            .filter((field) => field.name);
+    }
+
+    function validateTableDesignerInput(
+        tableName: string,
+        fields: TableDesignerFieldDraft[]
+    ): { tableName: string; fields: TableDesignerFieldDraft[] } {
+        const finalTableName = tableName.trim();
+        if (!finalTableName) {
+            throw new Error("El nombre de la tabla es obligatorio.");
+        }
+
+        const finalFields = sanitizeTableDesignerFields(fields);
+        if (finalFields.length === 0) {
+            throw new Error("Debes definir al menos un campo.");
+        }
+
+        const names = new Set<string>();
+        for (const field of finalFields) {
+            const normalizedName = field.name.toLowerCase();
+            if (names.has(normalizedName)) {
+                throw new Error(`El campo "${field.name}" está duplicado.`);
+            }
+            names.add(normalizedName);
+        }
+
+        return { tableName: finalTableName, fields: finalFields };
+    }
+
+    function buildCreateTableStatements(
+        tableName: string,
+        fields: TableDesignerFieldDraft[]
+    ): string[] {
+        return [[
+            `CREATE TABLE ${quoteSqlIdentifier(tableName)} (`,
+            fields.map((field) => `    ${buildCreateTableFieldDefinition(field)}`).join(",\n"),
+            ");"
+        ].join("\n")];
+    }
+
+    function buildAlterFieldStatement(tableName: string, field: TableDesignerFieldDraft): string {
+        const nullability = field.required ? " NOT NULL" : "";
+        return [
+            `ALTER TABLE ${quoteSqlIdentifier(tableName)}`,
+            `ALTER COLUMN ${quoteSqlIdentifier(field.name)} ${buildFieldTypeClause(field)}${nullability};`
+        ].join("\n");
+    }
+
+    function buildEditTableStatements(
+        tableName: string,
+        originalFields: import("./models/types").AccessTableFieldInfo[],
+        nextFields: TableDesignerFieldDraft[]
+    ): string[] {
+        const originalByName = new Map(
+            originalFields.map((field) => [field.name.toLowerCase(), field])
+        );
+        const statements: string[] = [];
+
+        const desiredExistingNames = new Set(
+            nextFields
+                .filter((field) => field.existing)
+                .map((field) => field.name.toLowerCase())
+        );
+
+        for (const originalField of originalFields) {
+            if (!desiredExistingNames.has(originalField.name.toLowerCase())) {
+                statements.push(buildDropColumnDdlTemplate(tableName, originalField.name));
+            }
+        }
+
+        for (const field of nextFields) {
+            if (!field.existing) {
+                statements.push([
+                    `ALTER TABLE ${quoteSqlIdentifier(tableName)}`,
+                    `ADD COLUMN ${buildCreateTableFieldDefinition(field)};`
+                ].join("\n"));
+                continue;
+            }
+
+            const original = originalByName.get(field.name.toLowerCase());
+            if (!original) {
+                statements.push([
+                    `ALTER TABLE ${quoteSqlIdentifier(tableName)}`,
+                    `ADD COLUMN ${buildCreateTableFieldDefinition(field)};`
+                ].join("\n"));
+                continue;
+            }
+
+            const sameType = normalizeFieldType(String(original.type ?? "TEXT")) === normalizeFieldType(field.type);
+            const sameSize = (original.size ?? undefined) === (field.size ?? undefined);
+            const sameRequired = Boolean(original.required) === Boolean(field.required);
+            if (!sameType || !sameSize || !sameRequired) {
+                statements.push(buildAlterFieldStatement(tableName, field));
+            }
+        }
+
+        return statements;
+    }
+
+    async function executeTableDesignerStatements(
+        connection: import("./models/types").AccessConnection,
+        tableName: string,
+        statements: string[],
+        mode: "create" | "edit"
+    ): Promise<void> {
+        if (statements.length === 0) {
+            vscode.window.showInformationMessage("No hay cambios de estructura para aplicar.");
+            return;
+        }
+
+        const actionLabel = mode === "create" ? "crear" : "modificar";
+        const confirm = await vscode.window.showWarningMessage(
+            mode === "create" ? "Crear tabla" : "Aplicar cambios de tabla",
+            {
+                modal: true,
+                detail: `Se van a ejecutar ${statements.length} sentencia(s) para ${actionLabel} "${tableName}" en "${connection.name}".`
+            },
+            "Aplicar"
+        );
+
+        if (confirm !== "Aplicar") {
+            return;
+        }
+
+        const results: Array<{ sql: string; payload: unknown }> = [];
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: mode === "create" ? `Creando tabla ${tableName}...` : `Aplicando cambios en ${tableName}...`,
+                cancellable: false
+            },
+            async (progress) => {
+                for (let index = 0; index < statements.length; index += 1) {
+                    const sql = statements[index];
+                    progress.report({ message: `${index + 1}/${statements.length}` });
+                    const result = await mcpClient.executeDml(connection, sql);
+                    results.push({ sql, payload: result.payload });
+                }
+            }
+        );
+
+        treeProvider.refresh();
+        const doc = await vscode.workspace.openTextDocument({
+            content: [
+                `# Resultado diseno de tabla`,
+                "",
+                `- Conexion: ${connection.name}`,
+                `- Tabla: ${tableName}`,
+                `- Operacion: ${mode === "create" ? "create" : "edit"}`,
+                `- Sentencias ejecutadas: ${results.length}`,
+                "",
+                ...results.flatMap((entry, index) => ([
+                    `## Sentencia ${index + 1}`,
+                    "",
+                    "```sql",
+                    entry.sql,
+                    "```",
+                    "",
+                    "```json",
+                    JSON.stringify(entry.payload, null, 2),
+                    "```",
+                    ""
+                ]))
+            ].join("\n"),
+            language: "markdown"
+        });
+        await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+        vscode.window.showInformationMessage(
+            mode === "create"
+                ? `Tabla creada: ${tableName}`
+                : `Cambios de tabla aplicados: ${tableName}`
+        );
+    }
+
+    function showTableDesignerWebview(options: {
+        connection: import("./models/types").AccessConnection;
+        mode: "create" | "edit";
+        initialTableName: string;
+        initialFields: TableDesignerFieldDraft[];
+        onApply: (tableName: string, fields: TableDesignerFieldDraft[]) => Promise<void>;
+    }): void {
+        const fieldsJson = JSON.stringify(options.initialFields);
+        const panel = vscode.window.createWebviewPanel(
+            "accessTableDesigner",
+            options.mode === "create"
+                ? `Diseno de tabla: nueva tabla`
+                : `Diseno de tabla: ${options.initialTableName}`,
+            vscode.ViewColumn.Beside,
+            { enableScripts: true, retainContextWhenHidden: true }
+        );
+
+        panel.webview.html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1e1e1e;color:#d4d4d4;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+  .toolbar{padding:10px 12px;background:#252526;border-bottom:1px solid #3e3e42;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .title{font-size:13px;font-weight:600;min-width:140px;}
+  .table-name{display:flex;align-items:center;gap:8px;flex:1;min-width:260px;}
+  .table-name input{flex:1;background:#1f1f1f;border:1px solid #555;color:#ddd;padding:6px 8px;border-radius:4px;font-size:12px;}
+  .btn{padding:6px 12px;font-size:12px;border:1px solid #4e4e52;background:#3a3a3c;color:#ccc;border-radius:4px;cursor:pointer;}
+  .btn:hover{background:#4e4e52;}
+  .btn.primary{background:#007acc;border-color:#007acc;color:#fff;}
+  .btn.primary:hover{background:#1193f5;}
+  .hint{padding:8px 12px;font-size:11px;color:#9d9d9d;background:#202020;border-bottom:1px solid #3e3e42;}
+  .table-wrap{flex:1;overflow:auto;padding:10px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{background:#2d2d30;color:#9cdcfe;font-weight:600;padding:6px 8px;border:1px solid #3e3e42;text-align:left;}
+  td{padding:6px;border:1px solid #3e3e42;vertical-align:middle;}
+  td input, td select{width:100%;background:#1f1f1f;border:1px solid #555;color:#ddd;padding:5px 6px;border-radius:4px;font-size:12px;}
+  td input[type="checkbox"]{width:auto;transform:scale(1.1);}
+  tr:nth-child(even) td{background:#252526;}
+  .actions{display:flex;gap:6px;justify-content:center;}
+  .status{padding:8px 12px;background:#007acc;color:#fff;font-size:11px;}
+  .muted{opacity:.65;}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <div class="title">${options.mode === "create" ? "Nueva tabla guiada" : "Editar tabla guiada"}</div>
+  <div class="table-name">
+    <label for="tableName">Tabla</label>
+    <input id="tableName" value="${escapeHtml(options.initialTableName)}" ${options.mode === "edit" ? "disabled" : ""}/>
+  </div>
+  <button class="btn" id="addRow">Agregar campo</button>
+  <button class="btn primary" id="apply">Aplicar</button>
+</div>
+<div class="hint">Modo guiado con MCP. Para renombrar un campo existente, elimínalo y crea otro nuevo.</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:34%">Campo</th>
+        <th style="width:24%">Tipo</th>
+        <th style="width:12%">Tamaño</th>
+        <th style="width:12%">Required</th>
+        <th style="width:18%">Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<div class="status" id="status">${escapeHtml(options.connection.name)}</div>
+<script>
+const vscode = acquireVsCodeApi();
+const INITIAL_FIELDS = ${fieldsJson};
+const TYPE_OPTIONS = ['TEXT','LONGTEXT','BYTE','INTEGER','LONG','SINGLE','DOUBLE','CURRENCY','DATETIME','YESNO','GUID','AUTOINCREMENT'];
+let rows = INITIAL_FIELDS.map(f => ({...f}));
+
+function esc(v){return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
+
+function render() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  rows.forEach((row, index) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = \`
+      <td><input data-key="name" data-index="\${index}" value="\${esc(row.name)}" \${row.existing ? 'disabled' : ''}/></td>
+      <td>
+        <select data-key="type" data-index="\${index}">
+          \${TYPE_OPTIONS.map(type => \`<option value="\${type}" \${String(row.type).toUpperCase()===type?'selected':''}>\${type}</option>\`).join('')}
+        </select>
+      </td>
+      <td><input data-key="size" data-index="\${index}" type="number" min="1" value="\${row.size ?? ''}" /></td>
+      <td style="text-align:center"><input data-key="required" data-index="\${index}" type="checkbox" \${row.required ? 'checked' : ''}/></td>
+      <td>
+        <div class="actions">
+          <button class="btn" data-remove="\${index}">Eliminar</button>
+        </div>
+      </td>
+    \`;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('input[data-key], select[data-key]').forEach(el => {
+    el.addEventListener('input', syncFromDom);
+    el.addEventListener('change', syncFromDom);
+  });
+  tbody.querySelectorAll('button[data-remove]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      rows.splice(Number(btn.getAttribute('data-remove')), 1);
+      render();
+    });
+  });
+  updateStatus();
+}
+
+function syncFromDom() {
+  document.querySelectorAll('#tbody tr').forEach((tr, index) => {
+    const nameEl = tr.querySelector('[data-key="name"]');
+    const typeEl = tr.querySelector('[data-key="type"]');
+    const sizeEl = tr.querySelector('[data-key="size"]');
+    const requiredEl = tr.querySelector('[data-key="required"]');
+    rows[index] = {
+      ...rows[index],
+      name: nameEl ? nameEl.value : rows[index].name,
+      type: typeEl ? typeEl.value : rows[index].type,
+      size: sizeEl && sizeEl.value ? Number(sizeEl.value) : undefined,
+      required: Boolean(requiredEl && requiredEl.checked)
+    };
+  });
+  updateStatus();
+}
+
+function updateStatus() {
+  document.getElementById('status').textContent = rows.length + ' campo(s) preparados';
+}
+
+document.getElementById('addRow').addEventListener('click', () => {
+  rows.push({ name: 'NuevoCampo', type: 'TEXT', size: 100, required: false, existing: false });
+  render();
+});
+
+document.getElementById('apply').addEventListener('click', () => {
+  syncFromDom();
+  vscode.postMessage({
+    command: 'apply',
+    tableName: document.getElementById('tableName').value,
+    fields: rows
+  });
+});
+
+window.addEventListener('message', event => {
+  if (event.data.command === 'status') {
+    document.getElementById('status').textContent = String(event.data.text || '');
+  }
+});
+
+render();
+</script>
+</body>
+</html>`;
+
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.command !== "apply") {
+                return;
+            }
+
+            try {
+                await options.onApply(
+                    String(message.tableName ?? options.initialTableName),
+                    Array.isArray(message.fields) ? message.fields as TableDesignerFieldDraft[] : []
+                );
+                panel.webview.postMessage({ command: "status", text: "Cambios aplicados correctamente." });
+            } catch (error) {
+                const messageText = error instanceof Error ? error.message : String(error);
+                panel.webview.postMessage({ command: "status", text: `Error: ${messageText}` });
+                vscode.window.showErrorMessage(`Error en el diseno de tabla: ${messageText}`);
+            }
+        });
+    }
+
+    async function openSqlTemplateEditor(
+        connection: import("./models/types").AccessConnection,
+        sql: string
+    ): Promise<void> {
+        activeSqlConnection = connection;
+        updateSqlStatusBar();
+        const doc = await vscode.workspace.openTextDocument({
+            language: "sql",
+            content: sql
+        });
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+
+    function stringifyResult(result: unknown): string {
+        if (result === undefined || result === null) {
+            return "Sin resultado.";
+        }
+        if (typeof result === "string") {
+            return result;
+        }
+
+        try {
+            return JSON.stringify(result, null, 2);
+        } catch {
+            return String(result);
+        }
+    }
+
+    function findTopLevelModuleIssue(code: string): string | undefined {
+        const lines = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+        let inProcedure = false;
+
+        for (let index = 0; index < lines.length; index += 1) {
+            const rawLine = lines[index];
+            const trimmed = rawLine.trim();
+            const lineNumber = index + 1;
+
+            if (!trimmed || trimmed.startsWith("'")) {
+                continue;
+            }
+
+            if (/^(Public|Private|Friend|Static)?\s*(Sub|Function|Property\s+(Get|Let|Set))\b/i.test(trimmed)) {
+                inProcedure = true;
+                continue;
+            }
+
+            if (/^End\s+(Sub|Function|Property)\b/i.test(trimmed)) {
+                inProcedure = false;
+                continue;
+            }
+
+            if (inProcedure) {
+                continue;
+            }
+
+            if (
+                /^(Option|Attribute|Version)\b/i.test(trimmed)
+                || /^(Public|Private|Friend|Global)?\s*(Dim|Const|Declare|Enum|Type|Event)\b/i.test(trimmed)
+                || /^End\s+(Enum|Type)\b/i.test(trimmed)
+                || /^#(If|Else|ElseIf|End)\b/i.test(trimmed)
+            ) {
+                continue;
+            }
+
+            if (
+                /^(Set|Call|Debug\.Print|MsgBox|DoCmd\.|If\b|For\b|Do\b|Select\b|With\b)/i.test(trimmed)
+                || /^[A-Za-z_][A-Za-z0-9_\.]*\s*=/.test(trimmed)
+            ) {
+                return `Posible sentencia ejecutable fuera de procedimiento en la l\u00ednea ${lineNumber}: ${trimmed}`;
+            }
+        }
+
+        return undefined;
+    }
+
+    async function getModuleCompileHint(
+        connection: import("./models/types").AccessConnection,
+        moduleName: string
+    ): Promise<string | undefined> {
+        const activeEditor = vscode.window.activeTextEditor;
+        const activeMeta = activeEditor
+            ? codeDocuments.get(activeEditor.document.uri.toString())
+            : undefined;
+
+        if (activeEditor && activeMeta?.objectType === "module" && activeMeta.objectName === moduleName) {
+            return findTopLevelModuleIssue(activeEditor.document.getText());
+        }
+
+        try {
+            const doc = await mcpClient.getObjectDocument(connection, "modules", moduleName);
+            return findTopLevelModuleIssue(doc.content);
+        } catch {
+            return undefined;
+        }
+    }
+
+    function extractCompileLineNumber(message: string): number | undefined {
+        const match = message.match(/\b(?:l\u00ednea|linea|line)\s*:?\s*(\d+)\b/i);
+        if (!match?.[1]) {
+            return undefined;
+        }
+
+        const parsed = Number.parseInt(match[1], 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    }
+
+    async function revealModuleCompileLine(moduleName: string, lineNumber?: number): Promise<void> {
+        if (!lineNumber) {
+            return;
+        }
+
+        const editor = vscode.window.activeTextEditor;
+        const meta = editor ? codeDocuments.get(editor.document.uri.toString()) : undefined;
+        if (!editor || meta?.objectType !== "module" || meta.objectName !== moduleName) {
+            return;
+        }
+
+        const targetLine = Math.max(0, Math.min(lineNumber - 1, editor.document.lineCount - 1));
+        const position = new vscode.Position(targetLine, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+    }
     async function pickOutputFolder(title: string): Promise<string | undefined> {
         const folder = await vscode.window.showOpenDialog({
             canSelectFiles: false,
@@ -499,19 +1328,19 @@ export function activate(context: vscode.ExtensionContext): void {
                 {
                     label: "Normal",
                     description: "Enlaces base + backlinks",
-                    detail: "Más rápido, grafo limpio",
+                    detail: "Faster, cleaner graph",
                     value: "standard" as const
                 },
                 {
                     label: "Alta densidad",
-                    description: "Incluye MOCs automáticos por dominio",
-                    detail: "Más conexiones en el grafo de Obsidian",
+                    description: "Includes automatic domain MOCs",
+                    detail: "More connections in the Obsidian graph",
                     value: "high" as const
                 }
             ],
             {
                 title: "Densidad de enlaces SecondBrain",
-                placeHolder: "Selecciona cómo quieres generar las interconexiones"
+                placeHolder: "Choose how you want to generate cross-links"
             }
         );
 
@@ -533,7 +1362,7 @@ export function activate(context: vscode.ExtensionContext): void {
             let lastUiMessage = "";
 
             await mcpClient.reconnect();
-            secondBrainOutput.appendLine("[inventory] MCP reconectado para iniciar exportación.");
+            secondBrainOutput.appendLine("[inventory] MCP reconnected to start export.");
 
             return await vscode.window.withProgress(
                 {
@@ -595,7 +1424,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 throw error;
             }
 
-            secondBrainOutput.appendLine("[inventory] Access reiniciado. Reintentando exportación una vez...");
+            secondBrainOutput.appendLine("[inventory] Access restarted. Retrying export once...");
             await mcpClient.reconnect();
             return await executeOnce();
         } finally {
@@ -616,10 +1445,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (isDml) {
             const verb = trimmed.match(/^\s*(\w+)/i)?.[1]?.toUpperCase() ?? "DML";
             const confirm = await vscode.window.showWarningMessage(
-                `Confirmación requerida`,
+                rt("sql.confirm.title"),
                 {
                     modal: true,
-                    detail: `Vas a ejecutar una sentencia ${verb} en "${connection.name}".\n\nEsta operación puede modificar o eliminar datos. ¿Continuar?`
+                    detail: rt("sql.confirm.detail", verb, connection.name)
                 },
                 "Ejecutar"
             );
@@ -634,14 +1463,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
             const affected = result.rowsAffected;
             const msg = affected !== undefined
-                ? `${verb} completado · ${affected} fila(s) afectada(s)`
+                ? `${verb} completado \u00b7 ${affected} fila(s) afectada(s)`
                 : `${verb} completado`;
 
             const doc = await vscode.workspace.openTextDocument({
                 content: [
                     `# Resultado ${verb}`,
                     "",
-                    `- Conexión: ${connection.name}`,
+                    `- ${rt("sql.result.connection")}: ${connection.name}`,
                     `- SQL: \`${trimmed}\``,
                     affected !== undefined ? `- Filas afectadas: **${affected}**` : "",
                     "",
@@ -652,6 +1481,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 language: "markdown"
             });
             await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+            treeProvider.refresh();
             vscode.window.showInformationMessage(msg);
             return;
         }
@@ -663,7 +1493,7 @@ export function activate(context: vscode.ExtensionContext): void {
         showResultsWebview(preview.sql, connection.name, preview.rows, preview.rowCount);
     }
 
-    // Selecciona la conexión activa para el editor SQL y actualiza el status bar
+    // Select the active connection for the SQL editor and update the status bar
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.pickSqlConnection", async () => {
             const connections = connectionStore.getAll();
@@ -678,8 +1508,8 @@ export function activate(context: vscode.ExtensionContext): void {
                 picked: activeSqlConnection?.id === c.id
             }));
             const pick = await vscode.window.showQuickPick(items, {
-                title: "Elegir un perfil de conexión Access",
-                placeHolder: "Elegir un perfil de conexión de la lista siguiente"
+                title: rt("sql.pickProfile.title"),
+                placeHolder: rt("sql.pickProfile.placeholder")
             });
             if (pick) {
                 activeSqlConnection = pick.connection;
@@ -688,7 +1518,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Abre un nuevo editor SQL vacío
+    // Open a new empty SQL editor
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.openSqlEditor", async () => {
             const doc = await vscode.workspace.openTextDocument({
@@ -697,13 +1527,173 @@ export function activate(context: vscode.ExtensionContext): void {
             });
             await vscode.window.showTextDocument(doc);
             if (!activeSqlConnection) {
-                activeSqlConnection = await pickConnection("Elige la conexión Access para este editor SQL");
+                activeSqlConnection = await pickConnection(rt("sql.openEditor.pickConnection"));
                 updateSqlStatusBar();
             }
         })
     );
 
-    // Ejecuta la query de un input box rápido
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.newQuery", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para la nueva consulta");
+            if (!connection) {
+                return;
+            }
+
+            await openNewQueryEditor(connection);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.createTableDesigner", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para la nueva tabla guiada");
+            if (!connection) {
+                return;
+            }
+
+            showTableDesignerWebview({
+                connection,
+                mode: "create",
+                initialTableName: "NuevaTabla",
+                initialFields: [
+                    { name: "Id", type: "AUTOINCREMENT", required: true },
+                    { name: "Nombre", type: "TEXT", size: 255, required: true }
+                ],
+                onApply: async (tableName, fields) => {
+                    const validated = validateTableDesignerInput(tableName, fields);
+                    const statements = buildCreateTableStatements(validated.tableName, validated.fields);
+                    await executeTableDesignerStatements(connection, validated.tableName, statements, "create");
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.editTableDesigner", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para editar la tabla guiada");
+            if (!connection) {
+                return;
+            }
+
+            const tableName = node?.categoryKey === "tables"
+                ? String(node.objectInfo?.name ?? "").trim()
+                : await pickObjectFromCategory(connection, "table", "Editar tabla guiada");
+
+            if (!tableName) {
+                return;
+            }
+
+            const originalFields = await mcpClient.getTableFields(connection, tableName);
+            showTableDesignerWebview({
+                connection,
+                mode: "edit",
+                initialTableName: tableName,
+                initialFields: originalFields.map((field) => ({
+                    originalName: field.name,
+                    name: field.name,
+                    type: String(field.type ?? "TEXT"),
+                    size: field.size,
+                    required: Boolean(field.required),
+                    existing: true
+                })),
+                onApply: async (submittedTableName, fields) => {
+                    const validated = validateTableDesignerInput(submittedTableName, fields);
+                    const statements = buildEditTableStatements(tableName, originalFields, validated.fields);
+                    await executeTableDesignerStatements(connection, tableName, statements, "edit");
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.createTableDdl", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para la nueva tabla");
+            if (!connection) {
+                return;
+            }
+
+            const tableName = await vscode.window.showInputBox({
+                prompt: "Nombre de la nueva tabla",
+                value: "NuevaTabla",
+                validateInput: (value) => (value.trim() ? undefined : "El nombre es obligatorio")
+            });
+
+            if (!tableName?.trim()) {
+                return;
+            }
+
+            await openSqlTemplateEditor(connection, buildCreateTableDdlTemplate(tableName.trim()));
+            vscode.window.showInformationMessage("Plantilla DDL abierta. Ajusta el SQL y ejecútalo para crear la tabla.");
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.editTableDdl", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para editar la tabla");
+            if (!connection) {
+                return;
+            }
+
+            const tableName = node?.categoryKey === "tables"
+                ? String(node.objectInfo?.name ?? "").trim()
+                : await pickObjectFromCategory(connection, "table", "Editar tabla DDL");
+
+            if (!tableName) {
+                return;
+            }
+
+            const fields = await mcpClient.getTableFields(connection, tableName);
+            const operation = await vscode.window.showQuickPick(
+                [
+                    {
+                        label: "ADD COLUMN",
+                        description: "Agregar un nuevo campo",
+                        value: "add" as const
+                    },
+                    {
+                        label: "ALTER COLUMN",
+                        description: "Modificar un campo existente",
+                        value: "alter" as const
+                    },
+                    {
+                        label: "DROP COLUMN",
+                        description: "Eliminar un campo existente",
+                        value: "drop" as const
+                    }
+                ],
+                {
+                    title: `Editar tabla DDL: ${tableName}`,
+                    placeHolder: "Selecciona la operacion DDL"
+                }
+            );
+
+            if (!operation) {
+                return;
+            }
+
+            let sql = buildEditTableDdlTemplate(tableName, fields);
+            if (operation.value === "alter") {
+                const field = await pickTableField(fields, `ALTER COLUMN en ${tableName}`);
+                if (!field) {
+                    return;
+                }
+                sql = buildAlterColumnDdlTemplate(tableName, field);
+            } else if (operation.value === "drop") {
+                const field = await pickTableField(fields, `DROP COLUMN en ${tableName}`);
+                if (!field) {
+                    return;
+                }
+                sql = buildDropColumnDdlTemplate(tableName, field.name);
+            } else {
+                sql = buildAddColumnDdlTemplate(tableName, fields);
+            }
+
+            await openSqlTemplateEditor(connection, sql);
+            vscode.window.showInformationMessage(`Plantilla ${operation.label} abierta. Ajusta la sentencia y ejecutala para modificar la tabla.`);
+        })
+    );
+
+    // Run SQL from a quick input box
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.runSqlQuery", async () => {
             const connection = activeSqlConnection ?? await pickConnection();
@@ -714,7 +1704,7 @@ export function activate(context: vscode.ExtensionContext): void {
             updateSqlStatusBar();
 
             const sql = await vscode.window.showInputBox({
-                prompt: `SQL · ${connection.name}`,
+                prompt: rt("sql.input.prompt", connection.name),
                 placeHolder: "SELECT * FROM [MiTabla] WHERE ...",
                 ignoreFocusOut: true
             });
@@ -747,11 +1737,11 @@ export function activate(context: vscode.ExtensionContext): void {
                 : editor.document.getText(selection);
 
             if (!sql?.trim()) {
-                vscode.window.showInformationMessage("El editor está vacío o no hay texto seleccionado.");
+                vscode.window.showInformationMessage(rt("sql.editor.emptySelection"));
                 return;
             }
 
-            const connection = activeSqlConnection ?? await pickConnection("Elige la conexión Access para ejecutar el SQL");
+            const connection = activeSqlConnection ?? await pickConnection(rt("sql.execute.pickConnection"));
             if (!connection) {
                 return;
             }
@@ -767,7 +1757,70 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Guardar código VBA activo de vuelta al archivo Access
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.saveQueryToAccess", async (node?: any) => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showInformationMessage("No hay editor activo.");
+                return;
+            }
+
+            try {
+                const explicitQueryName = node?.categoryKey === "queries"
+                    ? String(node.objectInfo?.name ?? "").trim() || undefined
+                    : undefined;
+                await saveQueryDocumentToAccess(editor, explicitQueryName);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Error al guardar la consulta: ${message}`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.deleteQuery", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para eliminar la consulta");
+            if (!connection) {
+                return;
+            }
+
+            const queryName = node?.categoryKey === "queries"
+                ? node.objectInfo?.name
+                : await pickObjectFromCategory(connection, "query", "Eliminar consulta");
+
+            if (!queryName) {
+                return;
+            }
+
+            const confirm = await vscode.window.showWarningMessage(
+                rt("query.delete.title", queryName),
+                {
+                    modal: true,
+                    detail: rt("query.delete.detail", connection.name)
+                },
+                "Eliminar"
+            );
+
+            if (confirm !== "Eliminar") {
+                return;
+            }
+
+            const escapedQueryName = escapeVbaStringLiteral(String(queryName));
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Eliminando consulta ${queryName}...`,
+                    cancellable: false
+                },
+                () => mcpClient.evalVba(connection, `CurrentDb.QueryDefs.Delete "${escapedQueryName}"`, 15000)
+            );
+
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(`Consulta eliminada: ${queryName}`);
+        })
+    );
+
+    // Guardar codigo VBA activo de vuelta al archivo Access
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.saveCodeToAccess", async () => {
             const editor = vscode.window.activeTextEditor;
@@ -777,26 +1830,62 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             const meta = codeDocuments.get(editor.document.uri.toString());
             if (!meta) {
-                vscode.window.showWarningMessage("Este documento no está asociado a un objeto Access. Ábrelo desde el explorador.");
+                vscode.window.showWarningMessage("Este documento no est\u00e1 asociado a un objeto Access. \u00c1brelo desde el explorador.");
                 return;
             }
+            const isProcedure = !!meta.procedureName;
+            const targetName = meta.procedureName
+                ? `${meta.objectName}.${meta.procedureName}`
+                : meta.objectName;
+            const targetLabel = isProcedure ? "procedimiento" : "c\u00f3digo";
+            const actionLabel = isProcedure ? "Guardar procedimiento" : "Guardar";
             const confirm = await vscode.window.showWarningMessage(
-                `¿Guardar en Access?`,
+                isProcedure ? `\u00bfGuardar procedimiento en Access?` : `\u00bfGuardar en Access?`,
                 {
                     modal: true,
-                    detail: `Se sobreescribirá el código de "${meta.objectName}" (${meta.objectType}) en "${meta.connection.name}".`
+                    detail: `Se sobrescribir\u00e1 el ${targetLabel} de "${targetName}" (${meta.objectType}) en "${meta.connection.name}".`
                 },
-                "Guardar"
+                actionLabel
             );
-            if (confirm !== "Guardar") {
+            if (confirm !== actionLabel) {
                 return;
             }
             try {
+                const code = editor.document.getText();
                 await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Guardando ${meta.objectName}…`, cancellable: false },
-                    () => mcpClient.setCode(meta.connection, meta.objectType, meta.objectName, editor.document.getText())
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: isProcedure ? `Guardando procedimiento ${targetName}...` : `Guardando ${targetName}...`,
+                        cancellable: false
+                    },
+                    async () => {
+                        if (
+                            typeof meta.replaceStartLine === "number"
+                            && typeof meta.replaceCount === "number"
+                            && !meta.isNew
+                        ) {
+                            await mcpClient.replaceCodeLines(
+                                meta.connection,
+                                meta.objectType,
+                                meta.objectName,
+                                meta.replaceStartLine,
+                                meta.replaceCount,
+                                code
+                            );
+                            meta.replaceCount = editor.document.lineCount;
+                            codeDocuments.set(editor.document.uri.toString(), meta);
+                            return;
+                        }
+
+                        await mcpClient.setCode(meta.connection, meta.objectType, meta.objectName, code);
+                    }
                 );
-                vscode.window.showInformationMessage(`Código guardado en Access: ${meta.objectName}`);
+                treeProvider.refresh();
+                vscode.window.showInformationMessage(
+                    isProcedure
+                        ? `Procedimiento guardado en Access: ${targetName}`
+                        : `C\u00f3digo guardado en Access: ${targetName}`
+                );
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error al guardar: ${message}`);
@@ -804,6 +1893,188 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.saveModuleToAccess", async () => {
+            await vscode.commands.executeCommand("accessExplorer.saveCodeToAccess");
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.toggleVbComment", async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== "vb") {
+                vscode.window.showInformationMessage("No hay un editor VBA activo.");
+                return;
+            }
+
+            const document = editor.document;
+            const selections = editor.selections.length > 0 ? editor.selections : [editor.selection];
+
+            await editor.edit((editBuilder) => {
+                for (const selection of selections) {
+                    const startLine = selection.start.line;
+                    const endLine = selection.isEmpty
+                        ? selection.start.line
+                        : (selection.end.character === 0 ? Math.max(selection.end.line - 1, selection.start.line) : selection.end.line);
+
+                    const lineNumbers = Array.from(
+                        { length: Math.max(0, endLine - startLine) + 1 },
+                        (_, index) => startLine + index
+                    );
+
+                    const meaningfulLines = lineNumbers.filter((lineNumber) => {
+                        const text = document.lineAt(lineNumber).text;
+                        return text.trim().length > 0;
+                    });
+
+                    if (meaningfulLines.length === 0) {
+                        continue;
+                    }
+
+                    const allCommented = meaningfulLines.every((lineNumber) => {
+                        const text = document.lineAt(lineNumber).text;
+                        return /^\s*'/.test(text);
+                    });
+
+                    for (const lineNumber of meaningfulLines) {
+                        const line = document.lineAt(lineNumber);
+                        const text = line.text;
+                        const indentMatch = text.match(/^\s*/);
+                        const indentLength = indentMatch ? indentMatch[0].length : 0;
+
+                        if (allCommented) {
+                            const uncommented = text.replace(/^(\s*)'\s?/, "$1");
+                            editBuilder.replace(line.range, uncommented);
+                        } else {
+                            const commented = `${text.slice(0, indentLength)}'${text.slice(indentLength)}`;
+                            editBuilder.replace(line.range, commented);
+                        }
+                    }
+                }
+            });
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.createModule", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para el nuevo m\u00f3dulo");
+            if (!connection) {
+                return;
+            }
+
+            const moduleName = await vscode.window.showInputBox({
+                prompt: "Nombre del nuevo m\u00f3dulo VBA",
+                validateInput: (value) => (value.trim() ? undefined : "El nombre es obligatorio")
+            });
+
+            if (!moduleName?.trim()) {
+                return;
+            }
+
+            const doc = await vscode.workspace.openTextDocument({
+                language: "vb",
+                content: "Option Compare Database\nOption Explicit\n"
+            });
+            trackCodeDocument(doc, {
+                connection,
+                objectType: "module",
+                objectName: moduleName.trim(),
+                isNew: true
+            });
+            await vscode.window.showTextDocument(doc, { preview: false });
+            await updateEditorActionContexts();
+            vscode.window.showInformationMessage(`M\u00f3dulo listo para editar: ${moduleName.trim()}. Usa "Save to Access" para crearlo.`);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.deleteModule", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para eliminar el m\u00f3dulo");
+            if (!connection) {
+                return;
+            }
+
+            const moduleName = node?.categoryKey === "modules"
+                ? node.objectInfo?.name
+                : await pickObjectFromCategory(connection, "module", "Eliminar m\u00f3dulo VBA");
+
+            if (!moduleName) {
+                return;
+            }
+
+            const confirm = await vscode.window.showWarningMessage(
+                `\u00bfEliminar el m\u00f3dulo "${moduleName}"?`,
+                {
+                    modal: true,
+                    detail: `Se eliminar\u00e1 de "${connection.name}".`
+                },
+                "Eliminar"
+            );
+
+            if (confirm !== "Eliminar") {
+                return;
+            }
+
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Eliminando m\u00f3dulo ${moduleName}...`,
+                    cancellable: false
+                },
+                () => mcpClient.deleteVbaModule(connection, String(moduleName))
+            );
+
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(`M\u00f3dulo eliminado: ${moduleName}`);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.compileModule", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para compilar el m\u00f3dulo");
+            if (!connection) {
+                return;
+            }
+
+            const moduleName = node?.categoryKey === "modules"
+                ? node.objectInfo?.name
+                : codeDocuments.get(vscode.window.activeTextEditor?.document.uri.toString() ?? "")?.objectType === "module"
+                    ? codeDocuments.get(vscode.window.activeTextEditor?.document.uri.toString() ?? "")?.objectName
+                    : await pickObjectFromCategory(connection, "module", "Compilar m\u00f3dulo VBA");
+
+            if (!moduleName) {
+                return;
+            }
+
+            try {
+                const result = await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Compilando m\u00f3dulo ${moduleName}...`,
+                        cancellable: false
+                    },
+                    () => mcpClient.compileModule(connection, String(moduleName), 30000)
+                );
+
+                vscode.window.showInformationMessage(`M\u00f3dulo compilado correctamente: ${moduleName}. ${result}`);
+            } catch (error) {
+                let message = error instanceof Error ? error.message : String(error);
+                const topLevelIssue = await getModuleCompileHint(connection, String(moduleName));
+                if (topLevelIssue && !message.includes(topLevelIssue)) {
+                    message = `${message}\n\n${topLevelIssue}`;
+                }
+                const lineNumber = extractCompileLineNumber(message);
+                const doc = await vscode.workspace.openTextDocument({
+                    content: `Compilaci\u00f3n del m\u00f3dulo \u2014 ${moduleName}\n${"=".repeat(60)}\n\n${message}`,
+                    language: "plaintext"
+                });
+                await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
+                await revealModuleCompileLine(String(moduleName), lineNumber);
+                const suffix = typeof lineNumber === "number" ? ` L\u00ednea: ${lineNumber}.` : "";
+                vscode.window.showErrorMessage(`Error compilando el m\u00f3dulo ${moduleName}.${suffix} Revisa el documento abierto.`);
+            }
+        })
+    );
     // Compilar VBA
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.compileVba", async (node?: any) => {
@@ -813,7 +2084,7 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             try {
                 const result = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Compilando VBA en ${connection.name}…`, cancellable: false },
+                    { location: vscode.ProgressLocation.Notification, title: `Compilando VBA en ${connection.name}...`, cancellable: false },
                     () => mcpClient.compileVba(connection)
                 );
 
@@ -823,24 +2094,35 @@ export function activate(context: vscode.ExtensionContext): void {
 
                 if (hasErrors) {
                     const doc = await vscode.workspace.openTextDocument({
-                        content: `Compilación VBA — ${connection.name}\n${"=".repeat(60)}\n\n${result}`,
+                        content: `${rt("compileVba.docTitle", connection.name)}\n${"=".repeat(60)}\n\n${result}`,
                         language: "plaintext"
                     });
                     await vscode.window.showTextDocument(doc, { preview: false });
-                    vscode.window.showErrorMessage(`Compilación VBA con errores en "${connection.name}". Revisa el documento abierto.`);
+                    vscode.window.showErrorMessage(rt("compileVba.errorMessage", connection.name));
                 } else {
-                    vscode.window.showInformationMessage(`Compilación VBA correcta: ${result}`);
+                    vscode.window.showInformationMessage(rt("compileVba.successMessage", result));
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 // Also show the full error text as a document so no info is lost
                 const doc = await vscode.workspace.openTextDocument({
-                    content: `Error de compilación VBA — ${connection.name}\n${"=".repeat(60)}\n\n${message}`,
+                    content: `${rt("compileVba.errorDocTitle", connection.name)}\n${"=".repeat(60)}\n\n${message}`,
                     language: "plaintext"
                 });
                 await vscode.window.showTextDocument(doc, { preview: false });
                 vscode.window.showErrorMessage(`Error compilando VBA: ${message}`);
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.openVbaConsole", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para la consola VBA");
+            if (!connection) {
+                return;
+            }
+
+            showVbaConsoleWebview(connection, mcpClient);
         })
     );
 
@@ -852,8 +2134,8 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             const confirm = await vscode.window.showWarningMessage(
-                `¿Compact & Repair "${connection.name}"?`,
-                { modal: true, detail: `Esto compactará y reparará "${connection.dbPath}". Access debe estar cerrado o el archivo no bloqueado.` },
+                rt("compactRepair.title", connection.name),
+                { modal: true, detail: rt("compactRepair.detail", connection.dbPath) },
                 "Compactar"
             );
             if (confirm !== "Compactar") {
@@ -861,7 +2143,7 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             try {
                 const result = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Compactando ${connection.name}…`, cancellable: false },
+                    { location: vscode.ProgressLocation.Notification, title: `Compactando ${connection.name}...`, cancellable: false },
                     () => mcpClient.compactRepair(connection)
                 );
                 vscode.window.showInformationMessage(`Compact & Repair: ${result}`);
@@ -869,6 +2151,89 @@ export function activate(context: vscode.ExtensionContext): void {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error en Compact & Repair: ${message}`);
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.createDatabase", async () => {
+            const target = await vscode.window.showSaveDialog({
+                title: "Nueva base de datos Access",
+                saveLabel: "Crear base de datos",
+                filters: {
+                    "Access Database": ["accdb"]
+                }
+            });
+
+            if (!target) {
+                return;
+            }
+
+            const defaultName = path.basename(target.fsPath);
+            const connectionName = await vscode.window.showInputBox({
+                prompt: "Nombre de la nueva conexion",
+                value: defaultName,
+                validateInput: (value) => (value.trim() ? undefined : "El nombre es obligatorio")
+            });
+
+            if (!connectionName?.trim()) {
+                return;
+            }
+
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Creando base de datos Access...",
+                    cancellable: false
+                },
+                async () => {
+                    await mcpClient.createDatabase(target.fsPath, 30000);
+
+                    // create_database may leave the new file open in Access.
+                    try {
+                        await mcpClient.closeAccess(10000);
+                    } catch {
+                        // Ignore: there may be no active Access instance to close.
+                    }
+
+                    await mcpClient.disconnect();
+                }
+            );
+
+            await connectionStore.upsert(connectionName.trim(), target.fsPath);
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(`Base de datos creada y agregada: ${connectionName.trim()}`);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.closeAccess", async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                rt("closeAccess.title"),
+                {
+                    modal: true,
+                    detail: rt("closeAccess.detail")
+                },
+                "Cerrar Access"
+            );
+
+            if (confirm !== "Cerrar Access") {
+                return;
+            }
+
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Cerrando Access...",
+                    cancellable: false
+                },
+                async () => {
+                    await mcpClient.closeAccess(10000);
+                    await mcpClient.disconnect();
+                }
+            );
+
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(rt("closeAccess.success"));
         })
     );
 
@@ -901,14 +2266,14 @@ export function activate(context: vscode.ExtensionContext): void {
                 const action = await vscode.window.showInformationMessage(
                     `SecondBrain completo generado (${result.stats.tables} tablas, ${result.stats.queries} consultas).`,
                     "Abrir carpeta",
-                    "Abrir índice"
+                    rt("openIndex")
                 );
 
                 if (action === "Abrir carpeta") {
                     await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
                 }
 
-                if (action === "Abrir índice") {
+                if (action === rt("openIndex")) {
                     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
                     await vscode.window.showTextDocument(doc, { preview: false });
                 }
@@ -970,14 +2335,14 @@ export function activate(context: vscode.ExtensionContext): void {
                 const action = await vscode.window.showInformationMessage(
                     `SecondBrain por tipo generado (${categoryKey}).`,
                     "Abrir carpeta",
-                    "Abrir índice"
+                    rt("openIndex")
                 );
 
                 if (action === "Abrir carpeta") {
                     await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
                 }
 
-                if (action === "Abrir índice") {
+                if (action === rt("openIndex")) {
                     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
                     await vscode.window.showTextDocument(doc, { preview: false });
                 }
@@ -991,7 +2356,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.secondBrain.object", async (node?: ObjectNode) => {
             if (!node) {
-                vscode.window.showInformationMessage("Selecciona un objeto en el árbol para generar su SecondBrain individual.");
+                vscode.window.showInformationMessage(rt("secondBrain.selectObject"));
                 return;
             }
 
@@ -1021,14 +2386,14 @@ export function activate(context: vscode.ExtensionContext): void {
                 const action = await vscode.window.showInformationMessage(
                     `SecondBrain individual generado para ${node.objectInfo.name}.`,
                     "Abrir carpeta",
-                    "Abrir índice"
+                    rt("openIndex")
                 );
 
                 if (action === "Abrir carpeta") {
                     await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(result.outputDir));
                 }
 
-                if (action === "Abrir índice") {
+                if (action === rt("openIndex")) {
                     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(`${result.vaultDir}\\_index.md`));
                     await vscode.window.showTextDocument(doc, { preview: false });
                 }
@@ -1157,7 +2522,7 @@ async function registerMcpServerSilently(
     const info = await mcpClient.getMcpRuntimeInfo();
 
     // globalStorageUri = .../Code/User/globalStorage/<ext-id>
-    // Two dirs up → .../Code/User
+    // Two dirs up -> .../Code/User
     const userDataDir = path.resolve(context.globalStorageUri.fsPath, "..", "..");
     const mcpJsonPath = path.join(userDataDir, "mcp.json");
 
@@ -1167,7 +2532,7 @@ async function registerMcpServerSilently(
         const raw = fs.readFileSync(mcpJsonPath, "utf-8");
         existing = JSON.parse(raw) as typeof existing;
     } catch {
-        // File missing or invalid JSON — we will create/overwrite it
+        // File missing or invalid JSON - we will create/overwrite it
     }
 
     if (!existing.servers) {
@@ -1319,23 +2684,45 @@ async function openDetailNode(
     if (node.detailKind === "procedure") {
         const procName = String(node.payload?.name ?? node.label);
         const objectType = String(node.payload?.objectType ?? "module") as "module" | "form" | "report";
-        return await mcpClient.getProcedureDocument(
+        const procedureDoc = await mcpClient.getProcedureDocument(
             node.connection,
             objectType,
             node.objectInfo.name,
             procName
         );
+        return {
+            ...procedureDoc,
+            codeMeta: {
+                connection: node.connection,
+                objectType,
+                objectName: node.objectInfo.name,
+                procedureName: procName,
+                replaceStartLine: typeof node.payload?.start_line === "number" ? node.payload.start_line : undefined,
+                replaceCount: typeof node.payload?.count === "number" ? node.payload.count : undefined
+            }
+        };
     }
 
     if (node.detailKind === "controlProcedure") {
         const procName = String(node.payload?.name ?? node.label);
         const objectType = String(node.payload?.objectType ?? "form") as "form" | "report";
-        return await mcpClient.getProcedureDocument(
+        const procedureDoc = await mcpClient.getProcedureDocument(
             node.connection,
             objectType,
             node.objectInfo.name,
             procName
         );
+        return {
+            ...procedureDoc,
+            codeMeta: {
+                connection: node.connection,
+                objectType,
+                objectName: node.objectInfo.name,
+                procedureName: procName,
+                replaceStartLine: typeof node.payload?.start_line === "number" ? node.payload.start_line : undefined,
+                replaceCount: typeof node.payload?.count === "number" ? node.payload.count : undefined
+            }
+        };
     }
 
     if (node.detailKind === "controlPropertiesAction") {
@@ -1537,12 +2924,12 @@ function showLayoutWebview(
 <body>
   <div class="container">
     <div class="header">
-      <div class="title">📐 ${escapeHtml(objectName)}</div>
+      <div class="title">${rt("layout.title")} ${escapeHtml(objectName)}</div>
       <div class="info">
-        <div class="info-item">📊 <strong>Controles:</strong> ${controls.length}</div>
-        <div class="info-item">🔍 <strong>Escala:</strong> ${scale.toFixed(2)}x</div>
-        <div class="info-item">📏 <strong>Tamaño:</strong> ${safeMaxRight}×${safeMaxBottom}px</div>
-        <div class="info-item" style="font-style: italic; opacity: 0.7;">💡 Haz clic en un control para ir a él en el árbol</div>
+        <div class="info-item"><strong>${rt("layout.controls")}:</strong> ${controls.length}</div>
+        <div class="info-item"><strong>${rt("layout.scale")}:</strong> ${scale.toFixed(2)}x</div>
+        <div class="info-item"><strong>${rt("layout.size")}:</strong> ${safeMaxRight}\u00d7${safeMaxBottom}px</div>
+        <div class="info-item" style="font-style: italic; opacity: 0.7;">${rt("layout.clickHint")}</div>
       </div>
     </div>
     <div class="legend">${legendHtml}</div>
@@ -1623,6 +3010,216 @@ function showLayoutWebview(
             }
         }
     });
+}
+
+function showVbaConsoleWebview(
+    connection: import("./models/types").AccessConnection,
+    mcpClient: McpAccessClient
+): void {
+    const panel = vscode.window.createWebviewPanel(
+        "accessVbaConsole",
+        `Consola VBA \u00b7 ${connection.name}`,
+        vscode.ViewColumn.Beside,
+        { enableScripts: true, retainContextWhenHidden: true }
+    );
+
+    panel.webview.html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1e1e1e;color:#d4d4d4;display:flex;flex-direction:column;height:100vh;}
+  .toolbar{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#252526;border-bottom:1px solid #3e3e42;}
+  .toolbar label{font-size:12px;color:#9cdcfe;}
+  .toolbar select,.toolbar input,.toolbar textarea{background:#1f1f1f;color:#ddd;border:1px solid #555;border-radius:4px;padding:6px 8px;font-size:12px;}
+  .toolbar select,.toolbar input{height:32px;}
+  .toolbar button{height:32px;padding:0 12px;border:1px solid #007acc;background:#007acc;color:#fff;border-radius:4px;cursor:pointer;}
+  .toolbar button:hover{background:#1193f5;}
+  .toolbar .secondary{background:#3a3a3c;border-color:#4e4e52;color:#ccc;}
+  .body{display:grid;grid-template-columns:1.2fr 1fr;gap:0;flex:1;min-height:0;}
+  .pane{display:flex;flex-direction:column;min-height:0;}
+  .pane h2{padding:10px 12px;font-size:12px;font-weight:600;background:#2d2d30;border-bottom:1px solid #3e3e42;}
+  textarea{width:100%;resize:none;min-height:120px;line-height:1.4;background:#1f1f1f;color:#ddd;border:0;padding:12px;font-family:Consolas, monospace;}
+  #code{flex:1;}
+  #args{height:72px;border-top:1px solid #3e3e42;}
+  #history,#output{flex:1;overflow:auto;padding:12px;}
+  .entry{border:1px solid #3e3e42;border-radius:6px;padding:10px;margin-bottom:10px;background:#252526;}
+  .entry .meta{font-size:11px;color:#9cdcfe;margin-bottom:6px;}
+  .entry pre{white-space:pre-wrap;word-break:break-word;font-family:Consolas, monospace;font-size:12px;}
+  .status{padding:8px 12px;font-size:11px;background:#007acc;color:#fff;}
+  .hint{font-size:11px;color:#9d9d9d;padding:8px 12px;border-top:1px solid #3e3e42;background:#202020;}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <label for="mode">Modo</label>
+  <select id="mode">
+    <option value="eval">evalVba</option>
+    <option value="run">runVba</option>
+  </select>
+  <input id="proc" type="text" placeholder="Procedimiento para runVba" style="flex:1;min-width:220px;display:none;"/>
+  <button id="execute">Ejecutar</button>
+  <button id="clear" class="secondary">Limpiar salida</button>
+</div>
+<div class="body">
+  <div class="pane">
+    <h2>C\u00f3digo / expresi\u00f3n</h2>
+    <textarea id="code" spellcheck="false" placeholder="Debug.Print 1 + 1"></textarea>
+    <h2>Argumentos JSON para runVba</h2>
+    <textarea id="args" spellcheck="false" placeholder='[1, "texto", true]'></textarea>
+  </div>
+  <div class="pane">
+    <h2>Salida</h2>
+    <div id="output"></div>
+    <h2>Historial</h2>
+    <div id="history"></div>
+  </div>
+</div>
+<div class="status" id="status">${escapeHtml(connection.name)}</div>
+<div class="hint">evalVba acepta bloques VBA. runVba espera un procedimiento p\u00fablico y argumentos en formato JSON array.</div>
+<script>
+const vscode = acquireVsCodeApi();
+const modeEl = document.getElementById('mode');
+const procEl = document.getElementById('proc');
+const codeEl = document.getElementById('code');
+const argsEl = document.getElementById('args');
+const outputEl = document.getElementById('output');
+const historyEl = document.getElementById('history');
+const statusEl = document.getElementById('status');
+const history = [];
+
+function syncMode() {
+  const isRun = modeEl.value === 'run';
+  procEl.style.display = isRun ? '' : 'none';
+  argsEl.style.display = isRun ? '' : 'none';
+}
+
+function addHistory(entry) {
+  history.unshift(entry);
+  historyEl.innerHTML = history.map(item => (
+    '<div class="entry"><div class="meta">' + esc(item.mode) + ' \u00b7 ' + esc(item.when) + '</div><pre>'
+    + esc(item.input)
+    + '</pre></div>'
+  )).join('');
+}
+
+function setOutput(title, text) {
+  outputEl.innerHTML = '<div class="entry"><div class="meta">' + esc(title) + '</div><pre>' + esc(text) + '</pre></div>' + outputEl.innerHTML;
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+modeEl.addEventListener('change', syncMode);
+document.getElementById('clear').addEventListener('click', () => {
+  outputEl.innerHTML = '';
+  statusEl.textContent = 'Salida limpiada';
+});
+document.getElementById('execute').addEventListener('click', () => {
+  const mode = modeEl.value;
+  const code = codeEl.value;
+  const procedure = procEl.value;
+  const args = argsEl.value;
+  vscode.postMessage({ command: 'execute', mode, code, procedure, args });
+});
+
+window.addEventListener('message', event => {
+  const msg = event.data;
+  if (msg.command === 'result') {
+    setOutput(msg.title, msg.output);
+    addHistory({ mode: msg.mode, when: msg.when, input: msg.input });
+    statusEl.textContent = msg.status;
+  }
+  if (msg.command === 'error') {
+    setOutput('Error', msg.output);
+    statusEl.textContent = msg.status;
+  }
+});
+
+syncMode();
+</script>
+</body>
+</html>`;
+
+    panel.webview.onDidReceiveMessage(async (message) => {
+        if (message.command !== "execute") {
+            return;
+        }
+
+        const mode = String(message.mode ?? "eval");
+        const code = String(message.code ?? "").trim();
+
+        if (mode === "eval" && !code) {
+            vscode.window.showWarningMessage("Introduce una expresi\u00f3n o bloque VBA.");
+            return;
+        }
+
+        if (mode === "run") {
+            const procedure = String(message.procedure ?? "").trim();
+            if (!procedure) {
+                vscode.window.showWarningMessage("Indica el nombre del procedimiento para runVba.");
+                return;
+            }
+        }
+
+        try {
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: mode === "run" ? "Ejecutando procedimiento VBA..." : "Evaluando VBA...",
+                    cancellable: false
+                },
+                async () => {
+                    if (mode === "run") {
+                        const argsText = String(message.args ?? "").trim();
+                        const args = argsText ? JSON.parse(argsText) : [];
+                        if (!Array.isArray(args)) {
+                            throw new Error("Los argumentos de runVba deben ser un array JSON.");
+                        }
+
+                        return await mcpClient.runVba(connection, String(message.procedure), args, 30000);
+                    }
+
+                    return await mcpClient.evalVba(connection, code, 30000);
+                }
+            );
+
+            panel.webview.postMessage({
+                command: "result",
+                title: mode === "run" ? `runVba \u00b7 ${String(message.procedure ?? "")}` : "evalVba",
+                output: stringifyConsoleResult(result),
+                input: mode === "run"
+                    ? `${String(message.procedure ?? "").trim()}(${String(message.args ?? "").trim() || "[]"})`
+                    : code,
+                mode,
+                when: new Date().toLocaleTimeString(),
+                status: "\u00daltima ejecuci\u00f3n completada"
+            });
+        } catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            panel.webview.postMessage({
+                command: "error",
+                output: messageText,
+                status: "La ejecuci\u00f3n devolvi\u00f3 un error"
+            });
+            vscode.window.showErrorMessage(`Error en la consola VBA: ${messageText}`);
+        }
+    });
+}
+
+function stringifyConsoleResult(result: unknown): string {
+    if (result === undefined || result === null) {
+        return "Sin resultado.";
+    }
+    if (typeof result === "string") {
+        return result;
+    }
+
+    try {
+        return JSON.stringify(result, null, 2);
+    } catch {
+        return String(result);
+    }
 }
 
 function escapeHtml(input: string): string {
@@ -1740,15 +3337,15 @@ function showControlPropsWebview(
 </head>
 <body>
 <div class="toolbar">
-  <div class="title">🎛 ${escapeHtml(controlName)} · ${escapeHtml(objectName)} (${escapeHtml(objectType)})</div>
+  <div class="title">${rt("layout.title")} ${escapeHtml(controlName)}${rt("controlProps.titleSeparator")}${escapeHtml(objectName)} (${escapeHtml(objectType)})</div>
   <span class="status" id="status"></span>
-  <button class="btn" onclick="resetAll()">↺ Restaurar</button>
-  <button class="btn primary" onclick="saveProps()">💾 Guardar en Access</button>
+  <button class="btn" onclick="resetAll()">${rt("controlProps.reset")}</button>
+  <button class="btn primary" onclick="saveProps()">${rt("controlProps.save")}</button>
 </div>
 <div class="table-wrap">
   <table id="grid"><thead><tr><th>Propiedad</th><th>Valor</th></tr></thead><tbody id="tbody"></tbody></table>
 </div>
-<div class="footer" id="footer">${escapeHtml(connection.name)} · ${escapeHtml(objectName)}.${escapeHtml(controlName)}</div>
+<div class="footer" id="footer">${escapeHtml(connection.name)}${rt("controlProps.titleSeparator")}${escapeHtml(objectName)}.${escapeHtml(controlName)}</div>
 <script>
 const vscode = acquireVsCodeApi();
 const ORIGINAL = ${propsJson};
@@ -1815,7 +3412,7 @@ build();
             const changed = msg.props as Record<string, unknown>;
             try {
                 await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Guardando propiedades de ${controlName}…`, cancellable: false },
+                    { location: vscode.ProgressLocation.Notification, title: `Guardando propiedades de ${controlName}...`, cancellable: false },
                     () => mcpClient.setControlProps(connection, objectType, objectName, controlName, changed)
                 );
                 vscode.window.showInformationMessage(`Propiedades guardadas: ${Object.keys(changed).join(", ")}`);
@@ -1845,7 +3442,7 @@ function showResultsWebview(
     const rowsJson = JSON.stringify(safeRows);
     const columnsJson = JSON.stringify(columns);
     const displayCount = rowCount ?? safeRows.length;
-    const shortSql = sql.length > 120 ? sql.slice(0, 117) + "…" : sql;
+    const shortSql = sql.length > 120 ? sql.slice(0, 117) + "..." : sql;
 
     const panel = vscode.window.createWebviewPanel(
         "accessSqlResults",
@@ -1874,9 +3471,9 @@ function showResultsWebview(
   th{background:#2d2d30;color:#9cdcfe;font-weight:600;padding:5px 8px;border:1px solid #3e3e42;white-space:nowrap;user-select:none;cursor:pointer;}
   th:hover{background:#37373a;}
   th .sort-icon{margin-left:4px;opacity:0.5;font-size:10px;}
-  th.asc .sort-icon::after{content:'▲';}
-  th.desc .sort-icon::after{content:'▼';}
-  th:not(.asc):not(.desc) .sort-icon::after{content:'⇅';}
+  th.asc .sort-icon::after{content:'\\25B2';}
+  th.desc .sort-icon::after{content:'\\25BC';}
+  th:not(.asc):not(.desc) .sort-icon::after{content:'\\21C5';}
   td{padding:4px 8px;border:1px solid #3e3e42;white-space:pre;max-width:400px;overflow:hidden;text-overflow:ellipsis;vertical-align:top;}
   td.null-cell{color:#6a6a6a;font-style:italic;}
   tr:nth-child(even) td{background:#252526;}
@@ -1893,11 +3490,11 @@ function showResultsWebview(
 <body>
 <div class="toolbar">
   <div class="toolbar-info" title="${escapeHtml(sql)}">
-    <strong>${escapeHtml(connectionName)}</strong> &nbsp;·&nbsp; ${escapeHtml(shortSql)} &nbsp;·&nbsp; <strong>${displayCount}</strong> fila(s)
+    <strong>${escapeHtml(connectionName)}</strong> &nbsp;${rt("results.sep")}&nbsp; ${escapeHtml(shortSql)} &nbsp;${rt("results.sep")}&nbsp; <strong>${displayCount}</strong> fila(s)
   </div>
-  <input id="filter-box" placeholder="Filtrar…" oninput="applyFilter(this.value)"/>
-  <button class="btn" onclick="exportCsv()">⬇ CSV</button>
-  <button class="btn" onclick="copySelected()">📋 Copiar selección</button>
+  <input id="filter-box" placeholder="${escapeHtml(rt("results.filter.placeholder"))}" oninput="applyFilter(this.value)"/>
+  <button class="btn" onclick="exportCsv()">${rt("results.exportCsv")}</button>
+  <button class="btn" onclick="copySelected()">${rt("results.copySelection")}</button>
 </div>
 <div class="table-wrap" id="table-wrap">
   <div class="no-rows" id="no-rows" style="display:none">Sin resultados</div>
@@ -2051,3 +3648,4 @@ buildBody(ALL_ROWS);
         }
     });
 }
+

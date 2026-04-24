@@ -1,17 +1,26 @@
 import * as vscode from "vscode";
-import { AccessCategoryKey, AccessConnection, AccessObjectInfo } from "./types";
+import {
+    AccessCategoryKey,
+    AccessConnection,
+    AccessObjectInfo,
+    AccessTreeActionDefinition,
+    AccessTreeActionKind
+} from "./types";
 
-export type AccessTreeNode = ConnectionNode | CategoryNode | ObjectNode | DetailNode | MessageNode;
+export type AccessTreeNode = ConnectionNode | CategoryNode | ObjectNode | DetailNode | ActionNode | MessageNode;
 
 export type AccessDetailKind =
     | "tableFieldsBranch"
     | "tableDataJsonAction"
     | "tableDataTableAction"
+    | "tableManagementBranch"
     | "tableField"
     | "querySqlAction"
     | "queryRunJsonAction"
     | "queryRunTableAction"
+    | "queryManagementBranch"
     | "moduleProceduresBranch"
+    | "moduleManagementBranch"
     | "formProceduresBranch"
     | "reportProceduresBranch"
     | "procedure"
@@ -50,7 +59,7 @@ export class CategoryNode extends vscode.TreeItem {
         label: string
     ) {
         super(label, vscode.TreeItemCollapsibleState.Collapsed);
-        this.contextValue = "accessCategory";
+        this.contextValue = contextForCategory(categoryKey);
         this.iconPath = new vscode.ThemeIcon(iconForCategory(categoryKey));
     }
 }
@@ -67,7 +76,7 @@ export class ObjectNode extends vscode.TreeItem {
                 ? vscode.TreeItemCollapsibleState.Collapsed
                 : vscode.TreeItemCollapsibleState.None
         );
-        this.contextValue = "accessObject";
+        this.contextValue = contextForObject(categoryKey);
         this.description = objectDescription(categoryKey, objectInfo);
         this.tooltip = `${objectInfo.name}${this.description ? `\n${this.description}` : ""}`;
         this.iconPath = new vscode.ThemeIcon(iconForObject(categoryKey));
@@ -79,6 +88,26 @@ export class ObjectNode extends vscode.TreeItem {
                 arguments: [this]
             };
         }
+    }
+}
+
+export class ActionNode extends vscode.TreeItem {
+    constructor(
+        public readonly connection: AccessConnection,
+        public readonly categoryKey: AccessCategoryKey,
+        public readonly action: AccessTreeActionDefinition,
+        public readonly objectInfo?: AccessObjectInfo
+    ) {
+        super(action.label, vscode.TreeItemCollapsibleState.None);
+        this.contextValue = contextForAction(action.kind, objectInfo);
+        this.description = action.description;
+        this.tooltip = action.description ? `${action.label}\n${action.description}` : action.label;
+        this.iconPath = new vscode.ThemeIcon(iconForAction(action.kind));
+        this.command = {
+            command: action.command,
+            title: action.label,
+            arguments: [this]
+        };
     }
 }
 
@@ -133,7 +162,10 @@ function isBranchCategory(categoryKey: AccessCategoryKey): boolean {
 function isBranchDetail(detailKind: AccessDetailKind): boolean {
     return (
         detailKind === "tableFieldsBranch"
+        || detailKind === "tableManagementBranch"
+        || detailKind === "queryManagementBranch"
         || detailKind === "moduleProceduresBranch"
+        || detailKind === "moduleManagementBranch"
         || detailKind === "formProceduresBranch"
         || detailKind === "reportProceduresBranch"
         || detailKind === "formPropertiesBranch"
@@ -213,14 +245,18 @@ function iconForDetail(detailKind: AccessDetailKind): string {
         case "tableDataTableAction":
         case "queryRunTableAction":
             return "table";
+        case "tableManagementBranch":
+            return "tools";
         case "tableField":
             return "symbol-field";
         case "querySqlAction":
             return "file-code";
-        case "queryRunJsonAction":
-        case "queryRunTableAction":
-            return "play";
+        case "queryManagementBranch":
+            return "tools";
         case "moduleProceduresBranch":
+            return "symbol-method";
+        case "moduleManagementBranch":
+            return "tools";
         case "formProceduresBranch":
         case "reportProceduresBranch":
             return "symbol-method";
@@ -256,5 +292,81 @@ function iconForDetail(detailKind: AccessDetailKind): string {
             return "settings";
         default:
             return "symbol-misc";
+    }
+}
+
+function iconForAction(actionKind: AccessTreeActionKind): string {
+    switch (actionKind) {
+        case "createTableDesigner":
+        case "editTableDesigner":
+            return "edit-session";
+        case "createTableDdl":
+            return "table";
+        case "editTableDdl":
+            return "edit";
+        case "createModule":
+        case "newQuery":
+            return "add";
+        case "compileModule":
+        case "saveQueryToAccess":
+            return "check";
+        case "deleteModule":
+        case "deleteQuery":
+            return "trash";
+        default:
+            return "play";
+    }
+}
+
+function contextForAction(actionKind: AccessTreeActionKind, objectInfo?: AccessObjectInfo): string {
+    switch (actionKind) {
+        case "createTableDesigner":
+            return "accessTableCategoryCreateDesignerAction";
+        case "editTableDesigner":
+            return objectInfo ? "accessTableObjectEditDesignerAction" : "accessTableCategoryAction";
+        case "createTableDdl":
+            return "accessTableCategoryCreateAction";
+        case "editTableDdl":
+            return objectInfo ? "accessTableObjectEditAction" : "accessTableCategoryAction";
+        case "createModule":
+            return "accessModuleCategoryCreateAction";
+        case "newQuery":
+            return "accessQueryCategoryCreateAction";
+        case "compileModule":
+            return objectInfo ? "accessModuleObjectCompileAction" : "accessModuleCategoryAction";
+        case "deleteModule":
+            return objectInfo ? "accessModuleObjectDeleteAction" : "accessModuleCategoryAction";
+        case "saveQueryToAccess":
+            return objectInfo ? "accessQueryObjectSaveAction" : "accessQueryCategoryAction";
+        case "deleteQuery":
+            return objectInfo ? "accessQueryObjectDeleteAction" : "accessQueryCategoryAction";
+        default:
+            return "accessAction";
+    }
+}
+
+function contextForCategory(categoryKey: AccessCategoryKey): string {
+    switch (categoryKey) {
+        case "tables":
+            return "accessTableCategory";
+        case "modules":
+            return "accessModuleCategory";
+        case "queries":
+            return "accessQueryCategory";
+        default:
+            return "accessCategory";
+    }
+}
+
+function contextForObject(categoryKey: AccessCategoryKey): string {
+    switch (categoryKey) {
+        case "tables":
+            return "accessTableObject";
+        case "modules":
+            return "accessModuleObject";
+        case "queries":
+            return "accessQueryObject";
+        default:
+            return "accessObject";
     }
 }

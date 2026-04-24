@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.0 - 2026-04-24
+- **Módulos VBA**: nuevos comandos "Crear módulo", "Eliminar módulo" y "Compilar módulo individual" desde el árbol de objetos.
+- **Editor VBA**: comando "Guardar módulo en Access" para escribir el código editado de vuelta al .accdb, y toggle "Comentar/Descomentar VBA" (`'`) en el editor.
+- **Consultas**: crear nueva consulta guardada, editar SQL en el editor, guardar de vuelta a Access y eliminar consulta, todo desde el árbol.
+- **Tablas**: diseñador guiado de tablas (crear y editar) y editor DDL para crear y modificar tablas sin salir de VS Code.
+- **Consola VBA**: panel interactivo para evaluar expresiones y ejecutar procedimientos VBA en tiempo real.
+- **Base de datos**: comando `Access: Create Database` para crear un .accdb nuevo y `Access: Close Access` para cerrar la instancia desde VS Code.
+- **Fixes producción SecondBrain**: cierre automático de Access al detectar "base de datos ya está abierta" + reintento; aborto anticipado tras 5 fallos consecutivos; reconexión MCP garantizada tras cualquier timeout agotado; módulos VBA usan el mismo modo degradado que formularios e informes.
+
 ## 1.0.19 - 2026-04-20
 
 - Added automatic registration of the MCP-Access server in VS Code's user-level `mcp.json` on startup, so Copilot and other MCP-aware tools discover it without manual configuration.
