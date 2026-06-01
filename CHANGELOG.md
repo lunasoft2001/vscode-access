@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.1 - 2026-06-01
+- MCP runtime auto-repair: migrates legacy `MCP-Access-main` to `MCP-Access` and normalizes partial/duplicated folder states.
+- ZIP installer hardened: validates extracted folder and `access_mcp_server.py` before continuing setup.
+- Python bootstrap hardened on Windows: first tries `winget --source winget`, then falls back to default source if needed.
+- Added compatibility fallback when resolving server script path from legacy managed runtime folder names.
+
 ## 1.1.0 - 2026-04-24
 - **Módulos VBA**: nuevos comandos "Crear módulo", "Eliminar módulo" y "Compilar módulo individual" desde el árbol de objetos.
 - **Editor VBA**: comando "Guardar módulo en Access" para escribir el código editado de vuelta al .accdb, y toggle "Comentar/Descomentar VBA" (`'`) en el editor.

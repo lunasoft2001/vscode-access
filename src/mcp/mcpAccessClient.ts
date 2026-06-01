@@ -1207,9 +1207,29 @@ export class McpAccessClient {
         }
 
         const managedBaseDir = this.getManagedRuntimeBaseDir();
+        const managedRepoDir = path.join(managedBaseDir, "MCP-Access");
+        const legacyManagedRepoDir = path.join(managedBaseDir, "MCP-Access-main");
+        const managedServerScript = path.join(managedRepoDir, "access_mcp_server.py");
+        const legacyManagedServerScript = path.join(legacyManagedRepoDir, "access_mcp_server.py");
+
+        // Auto-migrate legacy ZIP folder name used in older/partial installs.
+        if (!fs.existsSync(managedServerScript) && fs.existsSync(legacyManagedServerScript)) {
+            try {
+                if (fs.existsSync(managedRepoDir)) {
+                    fs.rmSync(managedRepoDir, { recursive: true, force: true });
+                }
+                fs.renameSync(legacyManagedRepoDir, managedRepoDir);
+                this.output.appendLine("Runtime MCP migrado automaticamente de MCP-Access-main a MCP-Access.");
+            } catch (error) {
+                const details = error instanceof Error ? error.message : String(error);
+                this.output.appendLine(`Aviso: no se pudo migrar MCP-Access-main automaticamente: ${details}`);
+            }
+        }
+
         const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
         const candidates = [
             path.join(managedBaseDir, "MCP-Access", "access_mcp_server.py"),
+            path.join(managedBaseDir, "MCP-Access-main", "access_mcp_server.py"),
             path.join(userHome, "mcp-servers", "MCP-Access", "access_mcp_server.py"),
             path.join(userHome, "mcp-servers", "access_mcp_server.py")
         ];
@@ -1237,6 +1257,7 @@ export class McpAccessClient {
         const serverScriptPath = path.join(repoDir, "access_mcp_server.py");
 
         await fs.promises.mkdir(baseDir, { recursive: true });
+        await this.normalizeManagedRuntimeLayout(baseDir, repoDir);
 
         const gitAvailable = await this.commandAvailable("git", ["--version"]);
         if (!fs.existsSync(repoDir)) {
@@ -1252,10 +1273,12 @@ export class McpAccessClient {
                         `Aviso: git clone falló. Se intentará descarga ZIP. ${clone.stderr || clone.stdout}`
                     );
                     await this.downloadMcpAccessZip(baseDir, repoDir);
+                    await this.normalizeManagedRuntimeLayout(baseDir, repoDir);
                 }
             } else {
                 this.output.appendLine("Git no está disponible. Se intentará descarga ZIP de MCP-Access.");
                 await this.downloadMcpAccessZip(baseDir, repoDir);
+                await this.normalizeManagedRuntimeLayout(baseDir, repoDir);
             }
         } else if (gitAvailable) {
             const pull = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
@@ -1339,6 +1362,46 @@ export class McpAccessClient {
         }
     }
 
+    private async normalizeManagedRuntimeLayout(baseDir: string, repoDir: string): Promise<void> {
+        const legacyRepoDir = path.join(baseDir, "MCP-Access-main");
+        const serverInRepo = path.join(repoDir, "access_mcp_server.py");
+        const serverInLegacyRepo = path.join(legacyRepoDir, "access_mcp_server.py");
+
+        const repoExists = fs.existsSync(repoDir);
+        const legacyExists = fs.existsSync(legacyRepoDir);
+
+        if (!legacyExists) {
+            return;
+        }
+
+        if (!repoExists) {
+            await fs.promises.rename(legacyRepoDir, repoDir);
+            this.output.appendLine("Runtime MCP normalizado: MCP-Access-main renombrado a MCP-Access.");
+            return;
+        }
+
+        const repoHasServer = fs.existsSync(serverInRepo);
+        const legacyHasServer = fs.existsSync(serverInLegacyRepo);
+
+        if (!repoHasServer && legacyHasServer) {
+            await fs.promises.rm(repoDir, { recursive: true, force: true });
+            await fs.promises.rename(legacyRepoDir, repoDir);
+            this.output.appendLine("Runtime MCP reparado: se reemplazó MCP-Access incompleto por MCP-Access-main.");
+            return;
+        }
+
+        if (repoHasServer && legacyHasServer) {
+            await fs.promises.rm(legacyRepoDir, { recursive: true, force: true });
+            this.output.appendLine("Runtime MCP normalizado: se eliminó carpeta legacy MCP-Access-main.");
+            return;
+        }
+
+        // Neither folder is fully valid. Keep MCP-Access as target and remove stale legacy leftovers.
+        if (!legacyHasServer) {
+            await fs.promises.rm(legacyRepoDir, { recursive: true, force: true });
+        }
+    }
+
     private async downloadMcpAccessZip(baseDir: string, repoDir: string): Promise<void> {
         const tempZip = path.join(baseDir, `mcp-access-main-${Date.now()}.zip`);
         const extractedDir = path.join(baseDir, "MCP-Access-main");
@@ -1352,8 +1415,10 @@ export class McpAccessClient {
             "if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }",
             `if (Test-Path -LiteralPath '${escapePowerShellString(extractedDir)}') { Remove-Item -LiteralPath '${escapePowerShellString(extractedDir)}' -Recurse -Force }`,
             "Expand-Archive -LiteralPath $zip -DestinationPath $base -Force",
-            `if (!(Test-Path -LiteralPath '${escapePowerShellString(extractedDir)}')) { throw 'No se encontró carpeta extraída MCP-Access-main.' }`,
-            "Rename-Item -LiteralPath $extractedDir -NewName 'MCP-Access' -Force",
+            "$expanded = Get-ChildItem -LiteralPath $base -Directory | Where-Object { $_.Name -like 'MCP-Access*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1",
+            "if (-not $expanded) { throw 'No se encontró carpeta extraída MCP-Access*.' }",
+            "if ($expanded.FullName -ne $repo) { Rename-Item -LiteralPath $expanded.FullName -NewName 'MCP-Access' -Force }",
+            "if (!(Test-Path -LiteralPath (Join-Path $repo 'access_mcp_server.py'))) { throw 'No se encontró access_mcp_server.py tras extraer ZIP.' }",
             "Remove-Item -LiteralPath $zip -Force"
         ].join("; ");
 
@@ -1563,17 +1628,41 @@ export class McpAccessClient {
             throw new Error("No se encontró winget para instalar Python automáticamente.");
         }
 
-        await this.runCommand(
+        const wingetInstallArgs = [
+            "install",
+            "--id", "Python.Python.3.12",
+            "-e",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--scope", "user"
+        ];
+
+        const preferredSourceInstall = await this.runCommand(
             "winget",
-            [
-                "install",
-                "--id", "Python.Python.3.12",
-                "-e",
-                "--accept-package-agreements",
-                "--accept-source-agreements",
-                "--scope", "user"
-            ]
+            [...wingetInstallArgs, "--source", "winget"],
+            undefined,
+            true
         );
+
+        if (preferredSourceInstall.exitCode !== 0) {
+            this.output.appendLine(
+                "Aviso: falló instalación de Python con 'winget --source winget'. Se intentará sin source explícito."
+            );
+            this.output.appendLine(`Detalle: ${preferredSourceInstall.stderr || preferredSourceInstall.stdout}`);
+
+            const fallbackInstall = await this.runCommand(
+                "winget",
+                wingetInstallArgs,
+                undefined,
+                true
+            );
+
+            if (fallbackInstall.exitCode !== 0) {
+                throw new Error(
+                    `No se pudo instalar Python automáticamente con winget. ${fallbackInstall.stderr || fallbackInstall.stdout}`
+                );
+            }
+        }
 
         const installed = this.findSystemPythonExecutable();
         if (!installed) {
@@ -1796,7 +1885,8 @@ export class McpAccessClient {
             "$zip = \"$env:TEMP\\MCP-Access-main.zip\"",
             "Invoke-WebRequest https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip -OutFile $zip",
             "Expand-Archive -Path $zip -DestinationPath . -Force",
-            "cd .\\MCP-Access-main",
+            "Rename-Item -Path .\\MCP-Access-main -NewName MCP-Access -Force",
+            "cd .\\MCP-Access",
             "py -3 -m venv .venv",
             ".\\.venv\\Scripts\\python.exe -m pip install --upgrade pip",
             ".\\.venv\\Scripts\\python.exe -m pip install --only-binary :all: cryptography",
