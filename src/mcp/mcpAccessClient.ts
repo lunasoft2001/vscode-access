@@ -17,6 +17,7 @@ import {
     AccessScreenshotInfo,
     AccessTableFieldInfo
 } from "../models/types";
+import { rt } from "../utils/runtimeL10n";
 
 interface AccessReference {
     name: string;
@@ -72,13 +73,27 @@ interface PrerequisiteState {
     serverScriptPath: string;
 }
 
+interface McpVersionInfo {
+    version: string;
+    commit: string;
+    originUrl: string;
+}
+
 export interface McpRuntimeInfo {
     managedBaseDir: string;
     managedServerScriptPath: string;
     resolvedServerScriptPath: string;
     pythonCommand: string;
     mcpJsonSnippet: string;
+    mcpVersion: string;
+    mcpCommit: string;
+    mcpOriginUrl: string;
+    mcpSourceRepositoryUrl: string;
+    mcpSourceArchiveUrl: string;
 }
+
+const MCP_ACCESS_REPOSITORY_URL = "https://github.com/unmateria/MCP-Access.git";
+const MCP_ACCESS_ARCHIVE_URL = "https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip";
 
 export class McpAccessClient {
     private client: Client | undefined;
@@ -115,6 +130,7 @@ export class McpAccessClient {
     async getMcpRuntimeInfo(): Promise<McpRuntimeInfo> {
         const cfg = this.getConfig();
         const managedBaseDir = this.getManagedRuntimeBaseDir();
+        const managedRepoDir = path.join(managedBaseDir, "MCP-Access");
         const managedServerScriptPath = path.join(managedBaseDir, "MCP-Access", "access_mcp_server.py");
 
         let pythonCommand = cfg.get<string>("mcp.pythonCommand", "python").trim() || "python";
@@ -145,12 +161,52 @@ export class McpAccessClient {
             2
         );
 
+        const mcpVersionInfo = await this.getManagedMcpVersionInfo(managedRepoDir);
+
         return {
             managedBaseDir,
             managedServerScriptPath,
             resolvedServerScriptPath,
             pythonCommand,
-            mcpJsonSnippet
+            mcpJsonSnippet,
+            mcpVersion: mcpVersionInfo.version,
+            mcpCommit: mcpVersionInfo.commit,
+            mcpOriginUrl: mcpVersionInfo.originUrl,
+            mcpSourceRepositoryUrl: MCP_ACCESS_REPOSITORY_URL,
+            mcpSourceArchiveUrl: MCP_ACCESS_ARCHIVE_URL
+        };
+    }
+
+    private async getManagedMcpVersionInfo(repoDir: string): Promise<McpVersionInfo> {
+        if (!fs.existsSync(repoDir)) {
+            return {
+                version: "no instalado",
+                commit: "n/a",
+                originUrl: MCP_ACCESS_REPOSITORY_URL
+            };
+        }
+
+        const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
+        if (!hasGitMetadata) {
+            return {
+                version: "desconocida (instalado por ZIP)",
+                commit: "n/a",
+                originUrl: MCP_ACCESS_ARCHIVE_URL
+            };
+        }
+
+        const [tagResult, commitResult, originResult] = await Promise.all([
+            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--abbrev=0"], undefined, true),
+            this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
+            this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
+        ]);
+
+        return {
+            version: tagResult.exitCode === 0 ? (tagResult.stdout || "sin tag") : "sin tag",
+            commit: commitResult.exitCode === 0 ? (commitResult.stdout || "n/a") : "n/a",
+            originUrl: originResult.exitCode === 0
+                ? (originResult.stdout || MCP_ACCESS_REPOSITORY_URL)
+                : MCP_ACCESS_REPOSITORY_URL
         };
     }
 
@@ -1149,12 +1205,12 @@ export class McpAccessClient {
             this.installPromptShown = true;
 
             const action = await vscode.window.showWarningMessage(
-                "No se encontró MCP-Access (access_mcp_server.py). ¿Quieres instalarlo automáticamente?",
-                "Instalar automáticamente",
-                "Abrir configuración"
+                rt("mcp.install.prompt"),
+                rt("mcp.install.auto"),
+                rt("open.settings")
             );
 
-            if (action === "Abrir configuración") {
+            if (action === rt("open.settings")) {
                 await vscode.commands.executeCommand(
                     "workbench.action.openSettings",
                     "accessExplorer.mcp.serverScriptPath"
@@ -1164,15 +1220,15 @@ export class McpAccessClient {
                 );
             }
 
-            if (action !== "Instalar automáticamente") {
-                throw new Error("MCP-Access no está instalado o configurado.");
+            if (action !== rt("mcp.install.auto")) {
+                throw new Error(rt("mcp.install.notConfigured"));
             }
 
             try {
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: "Instalando MCP-Access...",
+                        title: rt("mcp.install.progress"),
                         cancellable: false
                     },
                     async () => {
@@ -1187,12 +1243,12 @@ export class McpAccessClient {
                 await this.showInstallFailureDiagnostics(details);
 
                 throw new Error(
-                    `No se pudo instalar MCP-Access automaticamente. ${details}`
+                    rt("mcp.install.failed", details)
                 );
             }
 
             const scriptPath = this.resolveServerScriptPath(cfg);
-            vscode.window.showInformationMessage("MCP-Access instalado correctamente.");
+            vscode.window.showInformationMessage(rt("mcp.install.success"));
             return scriptPath;
         }
     }
@@ -1264,7 +1320,7 @@ export class McpAccessClient {
             if (gitAvailable) {
                 const clone = await this.runCommand(
                     "git",
-                    ["clone", "https://github.com/unmateria/MCP-Access.git", repoDir],
+                    ["clone", MCP_ACCESS_REPOSITORY_URL, repoDir],
                     undefined,
                     true
                 );
@@ -1286,7 +1342,13 @@ export class McpAccessClient {
                 this.output.appendLine(`Aviso: no se pudo actualizar MCP-Access con git pull. ${pull.stderr}`);
             }
         } else {
-            this.output.appendLine("MCP-Access ya existe localmente; Git no disponible para actualizar.");
+            this.output.appendLine("Git no disponible. Se intentará actualizar MCP-Access con descarga ZIP.");
+            try {
+                await this.downloadMcpAccessZipWithBackup(baseDir, repoDir);
+                await this.normalizeManagedRuntimeLayout(baseDir, repoDir);
+            } catch (error) {
+                this.output.appendLine(`Aviso: no se pudo actualizar MCP-Access con ZIP: ${error instanceof Error ? error.message : String(error)}`);
+            }
         }
 
         const uvAvailable = await this.commandAvailable("uv", ["--version"]);
@@ -1410,8 +1472,11 @@ export class McpAccessClient {
             `$base='${escapePowerShellString(baseDir)}'`,
             `$zip='${escapePowerShellString(tempZip)}'`,
             `$repo='${escapePowerShellString(repoDir)}'`,
-            "$url='https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip'",
-            "Invoke-WebRequest -Uri $url -OutFile $zip",
+            `$url='${escapePowerShellString(MCP_ACCESS_ARCHIVE_URL)}'`,
+            // Timeout de 300 segundos (5 minutos) para descarga
+            "Invoke-WebRequest -Uri $url -OutFile $zip -TimeoutSec 300",
+            "if (!(Test-Path -LiteralPath $zip)) { throw 'Descarga de ZIP falló - archivo no creado.' }",
+            "if ((Get-Item -LiteralPath $zip).Length -lt 10000) { throw 'ZIP descargado es demasiado pequeño - posible corrupción.' }",
             "if (Test-Path -LiteralPath $repo) { Remove-Item -LiteralPath $repo -Recurse -Force }",
             `if (Test-Path -LiteralPath '${escapePowerShellString(extractedDir)}') { Remove-Item -LiteralPath '${escapePowerShellString(extractedDir)}' -Recurse -Force }`,
             "Expand-Archive -LiteralPath $zip -DestinationPath $base -Force",
@@ -1423,6 +1488,34 @@ export class McpAccessClient {
         ].join("; ");
 
         await this.runCommand("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
+    }
+
+    private async downloadMcpAccessZipWithBackup(baseDir: string, repoDir: string): Promise<void> {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+        const backupDir = path.join(baseDir, `MCP-Access_backup_${timestamp}`);
+
+        // Crear backup de la versión actual si existe
+        if (fs.existsSync(repoDir)) {
+            this.output.appendLine(`Creando backup de MCP-Access: ${backupDir}`);
+            await fs.promises.cp(repoDir, backupDir, { recursive: true });
+        }
+
+        try {
+            // Intentar descargar actualización
+            await this.downloadMcpAccessZip(baseDir, repoDir);
+            this.output.appendLine("MCP-Access actualizado correctamente desde ZIP.");
+        } catch (error) {
+            // Si falla, restaurar desde backup
+            if (fs.existsSync(backupDir)) {
+                this.output.appendLine(`Error en descarga, restaurando desde backup: ${backupDir}`);
+                if (fs.existsSync(repoDir)) {
+                    await fs.promises.rm(repoDir, { recursive: true, force: true });
+                }
+                await fs.promises.cp(backupDir, repoDir, { recursive: true });
+                this.output.appendLine("MCP-Access restaurado desde backup.");
+            }
+            throw error;
+        }
     }
 
     private async installMcpRuntimeDependencies(uvAvailable: boolean, venvPython: string): Promise<void> {
@@ -1554,24 +1647,24 @@ export class McpAccessClient {
         const available = await this.commandAvailable(pythonCommand, ["--version"]);
         if (!available) {
             const action = await vscode.window.showWarningMessage(
-                `No se puede ejecutar Python con '${pythonCommand}'. ¿Quieres instalar Python automáticamente?`,
-                "Instalar Python",
-                "Descargar Python",
-                "Abrir configuración"
+                rt("python.unavailable.prompt", pythonCommand),
+                rt("python.install"),
+                rt("python.download"),
+                rt("open.settings")
             );
 
-            if (action === "Instalar Python") {
+            if (action === rt("python.install")) {
                 const installed = await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: "Instalando Python...",
+                        title: rt("python.install.progress"),
                         cancellable: false
                     },
                     async () => await this.installPythonRuntime()
                 );
 
                 await this.showEnvironmentHelp({
-                    title: "Python instalado",
+                    title: rt("python.installed.title"),
                     details: `Se detectó Python en '${installed}'.`,
                     steps: [
                         "Reintenta la conexión Access.",
@@ -1583,11 +1676,11 @@ export class McpAccessClient {
                 return installed;
             }
 
-            if (action === "Descargar Python") {
+            if (action === rt("python.download")) {
                 await vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/windows/"));
             }
 
-            if (action === "Abrir configuración") {
+            if (action === rt("open.settings")) {
                 await vscode.commands.executeCommand(
                     "workbench.action.openSettings",
                     "accessExplorer.mcp.pythonCommand"
@@ -1595,7 +1688,7 @@ export class McpAccessClient {
             }
 
             await this.showEnvironmentHelp({
-                title: "Python no está disponible",
+                title: rt("python.unavailable.title"),
                 details: `No se puede ejecutar Python con '${pythonCommand}'.`,
                 steps: [
                     "Instala Python 3.9 o superior.",
@@ -1617,7 +1710,7 @@ export class McpAccessClient {
         const wingetAvailable = await this.commandAvailable("winget", ["--version"]);
         if (!wingetAvailable) {
             await this.showEnvironmentHelp({
-                title: "No se puede instalar Python automáticamente",
+                title: rt("python.autoInstall.unavailable.title"),
                 details: "No se encontró winget en el sistema.",
                 steps: [
                     "Instala Python manualmente desde python.org.",
@@ -1703,7 +1796,7 @@ export class McpAccessClient {
                 this.output.appendLine("Pillow instalado correctamente.");
                 probeResult = await this.runServerImportProbe(currentPython, currentScript);
                 if (probeResult.exitCode === 0) {
-                    vscode.window.showInformationMessage("Se instaló Pillow automáticamente para las capturas de pantalla de formularios.");
+                    vscode.window.showInformationMessage(rt("pillow.installed"));
                     return { pythonCommand: currentPython, serverScriptPath: currentScript };
                 }
             } else {
@@ -1728,7 +1821,7 @@ export class McpAccessClient {
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: "Instalando/Reparando MCP-Access...",
+                        title: rt("mcp.repair.progress"),
                         cancellable: false
                     },
                     async () => {
@@ -1741,7 +1834,7 @@ export class McpAccessClient {
                 currentPython = await this.ensurePythonRuntime(cfg, currentScript);
                 probeResult = await this.runServerImportProbe(currentPython, currentScript);
                 if (probeResult.exitCode === 0) {
-                    vscode.window.showInformationMessage("MCP-Access instalado/reparado correctamente.");
+                    vscode.window.showInformationMessage(rt("mcp.repair.success"));
                     return { pythonCommand: currentPython, serverScriptPath: currentScript };
                 }
             }
@@ -1749,7 +1842,7 @@ export class McpAccessClient {
 
         const details = probeResult.stderr || probeResult.stdout || secondDetails;
         await this.showEnvironmentHelp({
-            title: "El entorno MCP-Access no está listo",
+            title: rt("mcp.environment.notReady.title"),
             details,
             steps: [
                 "Verifica primero que Python 3.9+ esté instalado y funcione con 'py -3 --version' o 'python --version'.",

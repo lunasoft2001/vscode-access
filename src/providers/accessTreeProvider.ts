@@ -17,6 +17,7 @@ import {
 import { McpAccessClient } from "../mcp/mcpAccessClient";
 import { ConnectionStore } from "../services/connectionStore";
 import { isAccessDatabaseOpenError, offerAccessRestart } from "../utils/accessRecovery";
+import { rt } from "../utils/runtimeL10n";
 
 export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNode> {
     private readonly onDidChangeEmitter = new vscode.EventEmitter<AccessTreeNode | undefined>();
@@ -68,7 +69,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
     private getConnectionNodes(): AccessTreeNode[] {
         const connections = this.connectionStore.getAll();
         if (connections.length === 0) {
-            return [new MessageNode("Sin conexiones. Usa Access: Add Connection.")];
+            return [new MessageNode(rt("tree.message.noConnections"))];
         }
 
         return connections.map((connection) => new ConnectionNode(connection));
@@ -96,7 +97,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
             if (!category?.toolObjectType) {
                 return actionNodes.length > 0
                     ? actionNodes
-                    : [new MessageNode("Categoria no soportada.")];
+                    : [new MessageNode(rt("tree.message.unsupportedCategory"))];
             }
 
             const objects = await this.mcpClient.listObjects(connection, category.toolObjectType);
@@ -116,7 +117,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 }
             }
 
-            return [new MessageNode(`Error: ${message}`)];
+            return [new MessageNode(rt("tree.message.error", message))];
         }
     }
 
@@ -126,12 +127,12 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
         objects: Array<{ name: string; objectType: string; metadata?: Record<string, unknown> }>
     ): AccessTreeNode[] {
         if (objects.length === 0) {
-            return [new MessageNode("Sin elementos.")];
+            return [new MessageNode(rt("tree.message.noItems"))];
         }
 
         return objects
             .slice()
-            .sort((a, b) => a.name.localeCompare(b.name, "es"))
+            .sort((a, b) => a.name.localeCompare(b.name))
             .map((object) => new ObjectNode(connection, categoryKey, object));
     }
 
@@ -140,55 +141,55 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
 
         if (categoryKey === "tables") {
             return [
-                new DetailNode(connection, categoryKey, objectInfo, "tableFieldsBranch", "Campos"),
-                new DetailNode(connection, categoryKey, objectInfo, "tableDataTableAction", "Datos (tabla, TOP 100)"),
-                new DetailNode(connection, categoryKey, objectInfo, "tableDataJsonAction", "Datos (JSON, TOP 100)"),
-                new DetailNode(connection, categoryKey, objectInfo, "tableManagementBranch", "Gestion")
+                new DetailNode(connection, categoryKey, objectInfo, "tableFieldsBranch", rt("tree.label.fields")),
+                new DetailNode(connection, categoryKey, objectInfo, "tableDataTableAction", rt("tree.label.dataTableTop100")),
+                new DetailNode(connection, categoryKey, objectInfo, "tableDataJsonAction", rt("tree.label.dataJsonTop100")),
+                new DetailNode(connection, categoryKey, objectInfo, "tableManagementBranch", rt("tree.label.management"))
             ];
         }
 
         if (categoryKey === "queries") {
             return [
                 new DetailNode(connection, categoryKey, objectInfo, "querySqlAction", "SQL"),
-                new DetailNode(connection, categoryKey, objectInfo, "queryRunTableAction", "Ejecutar (tabla, TOP 200)"),
-                new DetailNode(connection, categoryKey, objectInfo, "queryRunJsonAction", "Ejecutar (JSON, TOP 200)"),
-                new DetailNode(connection, categoryKey, objectInfo, "queryManagementBranch", "Gestion")
+                new DetailNode(connection, categoryKey, objectInfo, "queryRunTableAction", rt("tree.label.runTableTop200")),
+                new DetailNode(connection, categoryKey, objectInfo, "queryRunJsonAction", rt("tree.label.runJsonTop200")),
+                new DetailNode(connection, categoryKey, objectInfo, "queryManagementBranch", rt("tree.label.management"))
             ];
         }
 
         if (categoryKey === "modules") {
             return [
-                new DetailNode(connection, categoryKey, objectInfo, "moduleProceduresBranch", "Procedimientos"),
-                new DetailNode(connection, categoryKey, objectInfo, "moduleCodeAction", "Codigo completo"),
-                new DetailNode(connection, categoryKey, objectInfo, "moduleManagementBranch", "Gestion")
+                new DetailNode(connection, categoryKey, objectInfo, "moduleProceduresBranch", rt("tree.label.procedures")),
+                new DetailNode(connection, categoryKey, objectInfo, "moduleCodeAction", rt("tree.label.fullCode")),
+                new DetailNode(connection, categoryKey, objectInfo, "moduleManagementBranch", rt("tree.label.management"))
             ];
         }
 
         if (categoryKey === "forms") {
             return [
-                new DetailNode(connection, categoryKey, objectInfo, "formPropertiesBranch", "Propiedades"),
-                new DetailNode(connection, categoryKey, objectInfo, "formControlsBranch", "Controles"),
-                new DetailNode(connection, categoryKey, objectInfo, "formLayoutAction", "Layout (posiciones)"),
-                new DetailNode(connection, categoryKey, objectInfo, "formScreenshotAction", "Captura"),
-                new DetailNode(connection, categoryKey, objectInfo, "formProceduresBranch", "Procedimientos VBA"),
-                new DetailNode(connection, categoryKey, objectInfo, "formCodeAction", "Codigo VBA")
+                new DetailNode(connection, categoryKey, objectInfo, "formPropertiesBranch", rt("tree.label.properties")),
+                new DetailNode(connection, categoryKey, objectInfo, "formControlsBranch", rt("tree.label.controls")),
+                new DetailNode(connection, categoryKey, objectInfo, "formLayoutAction", rt("tree.label.layoutPositions")),
+                new DetailNode(connection, categoryKey, objectInfo, "formScreenshotAction", rt("tree.label.screenshot")),
+                new DetailNode(connection, categoryKey, objectInfo, "formProceduresBranch", rt("tree.label.vbaProcedures")),
+                new DetailNode(connection, categoryKey, objectInfo, "formCodeAction", rt("tree.label.vbaCode"))
             ];
         }
 
         if (categoryKey === "reports") {
             return [
-                new DetailNode(connection, categoryKey, objectInfo, "reportPropertiesBranch", "Propiedades"),
-                new DetailNode(connection, categoryKey, objectInfo, "reportControlsBranch", "Controles"),
-                new DetailNode(connection, categoryKey, objectInfo, "reportLayoutAction", "Layout (posiciones)"),
-                new DetailNode(connection, categoryKey, objectInfo, "reportScreenshotAction", "Captura"),
-                new DetailNode(connection, categoryKey, objectInfo, "reportProceduresBranch", "Procedimientos VBA"),
-                new DetailNode(connection, categoryKey, objectInfo, "reportCodeAction", "Codigo VBA")
+                new DetailNode(connection, categoryKey, objectInfo, "reportPropertiesBranch", rt("tree.label.properties")),
+                new DetailNode(connection, categoryKey, objectInfo, "reportControlsBranch", rt("tree.label.controls")),
+                new DetailNode(connection, categoryKey, objectInfo, "reportLayoutAction", rt("tree.label.layoutPositions")),
+                new DetailNode(connection, categoryKey, objectInfo, "reportScreenshotAction", rt("tree.label.screenshot")),
+                new DetailNode(connection, categoryKey, objectInfo, "reportProceduresBranch", rt("tree.label.vbaProcedures")),
+                new DetailNode(connection, categoryKey, objectInfo, "reportCodeAction", rt("tree.label.vbaCode"))
             ];
         }
 
         if (categoryKey === "macros") {
             return [
-                new DetailNode(connection, categoryKey, objectInfo, "macroCodeAction", "Definicion")
+                new DetailNode(connection, categoryKey, objectInfo, "macroCodeAction", rt("tree.label.definition"))
             ];
         }
 
@@ -200,7 +201,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
             if (node.detailKind === "tableFieldsBranch") {
                 const fields = await this.mcpClient.getTableFields(node.connection, node.objectInfo.name);
                 if (fields.length === 0) {
-                    return [new MessageNode("Sin campos.")];
+                    return [new MessageNode(rt("tree.message.noFields"))];
                 }
 
                 return fields.map((field) => {
@@ -239,7 +240,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 );
 
                 if (procedures.length === 0) {
-                    return [new MessageNode("Sin procedimientos.")];
+                    return [new MessageNode(rt("tree.message.noProcedures"))];
                 }
 
                 return procedures.map((proc) => new DetailNode(
@@ -265,7 +266,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 );
 
                 if (procedures.length === 0) {
-                    return [new MessageNode("Sin procedimientos.")];
+                    return [new MessageNode(rt("tree.message.noProcedures"))];
                 }
 
                 return procedures.map((proc) => new DetailNode(
@@ -291,7 +292,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 );
 
                 if (properties.length === 0) {
-                    return [new MessageNode("Sin propiedades.")];
+                    return [new MessageNode(rt("tree.message.noProperties"))];
                 }
 
                 return properties.map((prop) => new DetailNode(
@@ -319,13 +320,13 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 const proceduresByControl = indexProceduresByControl(procedures);
 
                 if (controls.length === 0) {
-                    return [new MessageNode("Sin controles.")];
+                    return [new MessageNode(rt("tree.message.noControls"))];
                 }
 
                 return controls.map((ctrl) => {
                     const controlProcedures = proceduresByControl.get(normalizeName(ctrl.name)) ?? [];
                     const description = [ctrl.type_name, ctrl.control_source ? `source: ${ctrl.control_source}` : undefined]
-                        .concat(controlProcedures.length > 0 ? [`eventos: ${controlProcedures.length}`] : [])
+                        .concat(controlProcedures.length > 0 ? [rt("tree.label.eventCount", controlProcedures.length)] : [])
                         .filter(Boolean)
                         .join(" | ");
                     return new DetailNode(
@@ -358,13 +359,13 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 const proceduresByControl = indexProceduresByControl(procedures);
 
                 if (controls.length === 0) {
-                    return [new MessageNode("Sin controles.")];
+                    return [new MessageNode(rt("tree.message.noControls"))];
                 }
 
                 return controls.map((ctrl) => {
                     const controlProcedures = proceduresByControl.get(normalizeName(ctrl.name)) ?? [];
                     const description = [ctrl.type_name, ctrl.control_source ? `source: ${ctrl.control_source}` : undefined]
-                        .concat(controlProcedures.length > 0 ? [`eventos: ${controlProcedures.length}`] : [])
+                        .concat(controlProcedures.length > 0 ? [rt("tree.label.eventCount", controlProcedures.length)] : [])
                         .filter(Boolean)
                         .join(" | ");
                     return new DetailNode(
@@ -390,7 +391,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                         node.categoryKey,
                         node.objectInfo,
                         "controlPropertiesAction",
-                        "Propiedades completas",
+                        rt("tree.label.fullProperties"),
                         node.payload
                     ),
                     new DetailNode(
@@ -398,7 +399,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                         node.categoryKey,
                         node.objectInfo,
                         "controlCodeBranch",
-                        "Codigo asociado",
+                        rt("tree.label.associatedCode"),
                         node.payload
                     )
                 ];
@@ -408,7 +409,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 const objectType = String(node.payload?.objectType ?? "form") as "form" | "report";
                 const controlName = String(node.payload?.name ?? "");
                 if (!controlName) {
-                    return [new MessageNode("Control sin nombre.")];
+                    return [new MessageNode(rt("tree.message.controlNoName"))];
                 }
 
                 const embedded = node.payload?.associatedProcedures;
@@ -422,7 +423,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                     );
 
                 if (procedures.length === 0) {
-                    return [new MessageNode("Sin procedimientos asociados.")];
+                    return [new MessageNode(rt("tree.message.noAssociatedProcedures"))];
                 }
 
                 return procedures.map((proc) => new DetailNode(
@@ -456,7 +457,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
                 }
             }
 
-            return [new MessageNode(`Error: ${message}`)];
+            return [new MessageNode(rt("tree.message.error", message))];
         }
     }
 
@@ -475,7 +476,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
     ): AccessTreeNode[] {
         const actions = ACCESS_OBJECT_ACTIONS[categoryKey] ?? [];
         if (actions.length === 0) {
-            return [new MessageNode("Sin acciones disponibles.")];
+            return [new MessageNode(rt("tree.message.noActionsAvailable"))];
         }
 
         return actions.map((action) => new ActionNode(connection, categoryKey, action, objectInfo));
@@ -494,7 +495,7 @@ export class AccessTreeProvider implements vscode.TreeDataProvider<AccessTreeNod
 
             // Create a DetailNode for the controls branch
             const objectInfo = { name: parentObjectName, objectType, metadata: {} };
-            const branchNode = new DetailNode(connection, categoryKey, objectInfo, branchKind, "Controles");
+            const branchNode = new DetailNode(connection, categoryKey, objectInfo, branchKind, rt("tree.label.controls"));
 
             // Get the children of the controls branch (which are individual controls)
             const controlChildren = await this.getDetailChildren(branchNode);
@@ -543,10 +544,10 @@ function indexProceduresByControl(
 function describeProcedure(startLine?: number, count?: number): string | undefined {
     const parts: string[] = [];
     if (typeof startLine === "number") {
-        parts.push(`linea ${startLine}`);
+        parts.push(rt("tree.label.line", startLine));
     }
     if (typeof count === "number") {
-        parts.push(`${count} lineas`);
+        parts.push(rt("tree.label.lines", count));
     }
 
     return parts.length > 0 ? parts.join(" | ") : undefined;

@@ -141,7 +141,7 @@ export function activate(context: vscode.ExtensionContext): void {
     void vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
-            title: "Comprobando requisitos de Access Explorer...",
+            title: rt("startup.checkingPrerequisites"),
             cancellable: false
         },
         async () => {
@@ -161,10 +161,10 @@ export function activate(context: vscode.ExtensionContext): void {
                 const changed = await registerMcpServerSilently(context, mcpClient);
                 if (changed) {
                     vscode.window.showInformationMessage(
-                        "Servidor MCP de Access registrado en mcp.json de usuario. Recarga VS Code para que Copilot lo detecte.",
-                        "Recargar"
+                        rt("mcp.registered.reloadNeeded"),
+                        rt("action.reload")
                     ).then(action => {
-                        if (action === "Recargar") {
+                        if (action === rt("action.reload")) {
                             void vscode.commands.executeCommand("workbench.action.reloadWindow");
                         }
                     });
@@ -173,7 +173,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`No se pudo registrar el servidor MCP: ${message}`);
+                vscode.window.showErrorMessage(rt("mcp.register.failed", message));
             }
         })
     );
@@ -189,18 +189,18 @@ export function activate(context: vscode.ExtensionContext): void {
             try {
                 await mcpClient.reconnect();
                 treeProvider.refresh();
-                vscode.window.showInformationMessage("MCP-Access reconectado.");
+                vscode.window.showInformationMessage(rt("mcp.reconnected"));
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 const recovered = await offerAccessRestart(message);
                 if (recovered) {
                     await mcpClient.reconnect();
                     treeProvider.refresh();
-                    vscode.window.showInformationMessage("MCP-Access reconectado tras reiniciar Access.");
+                    vscode.window.showInformationMessage(rt("mcp.reconnectedAfterRestart"));
                     return;
                 }
 
-                vscode.window.showErrorMessage(`No se pudo reconectar MCP-Access: ${message}`);
+                vscode.window.showErrorMessage(rt("mcp.reconnect.failed", message));
             }
         })
     );
@@ -211,10 +211,10 @@ export function activate(context: vscode.ExtensionContext): void {
                 await restartAccessProcesses();
                 await mcpClient.disconnect();
                 treeProvider.refresh();
-                vscode.window.showInformationMessage("Se reiniciaron procesos de Access.");
+                vscode.window.showInformationMessage(rt("access.restart.success"));
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`No se pudo reiniciar Access: ${message}`);
+                vscode.window.showErrorMessage(rt("access.restart.failed", message));
             }
         })
     );
@@ -225,7 +225,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const info = await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: "Resolviendo runtime MCP...",
+                        title: rt("mcp.runtime.resolving"),
                         cancellable: false
                     },
                     async () => await mcpClient.getMcpRuntimeInfo()
@@ -234,28 +234,31 @@ export function activate(context: vscode.ExtensionContext): void {
                 const summary = [
                     `Python: ${info.pythonCommand}`,
                     `Script MCP: ${info.resolvedServerScriptPath}`,
-                    `Runtime gestionado: ${info.managedBaseDir}`
+                    `Runtime gestionado: ${info.managedBaseDir}`,
+                    `MCP versión: ${info.mcpVersion}`,
+                    `MCP commit: ${info.mcpCommit}`,
+                    `Origen MCP: ${info.mcpOriginUrl}`
                 ].join("\n");
 
                 const action = await vscode.window.showInformationMessage(
-                    "Runtime MCP de Access Explorer resuelto.",
-                    "Copiar bloque mcp.json",
-                    "Abrir carpeta runtime",
-                    "Ver detalle"
+                    rt("mcp.runtime.resolved", info.mcpVersion),
+                    rt("mcp.runtime.copySnippet"),
+                    rt("mcp.runtime.openFolder"),
+                    rt("mcp.runtime.viewDetail")
                 );
 
-                if (action === "Copiar bloque mcp.json") {
+                if (action === rt("mcp.runtime.copySnippet")) {
                     await vscode.env.clipboard.writeText(info.mcpJsonSnippet);
-                    vscode.window.showInformationMessage("Bloque mcp.json copiado al portapapeles.");
+                    vscode.window.showInformationMessage(rt("mcp.runtime.snippetCopied"));
                     return;
                 }
 
-                if (action === "Abrir carpeta runtime") {
+                if (action === rt("mcp.runtime.openFolder")) {
                     await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(info.managedBaseDir));
                     return;
                 }
 
-                if (action === "Ver detalle") {
+                if (action === rt("mcp.runtime.viewDetail")) {
                     const doc = await vscode.workspace.openTextDocument({
                         language: "json",
                         content: JSON.stringify(
@@ -264,7 +267,12 @@ export function activate(context: vscode.ExtensionContext): void {
                                     pythonCommand: info.pythonCommand,
                                     resolvedServerScriptPath: info.resolvedServerScriptPath,
                                     managedBaseDir: info.managedBaseDir,
-                                    managedServerScriptPath: info.managedServerScriptPath
+                                    managedServerScriptPath: info.managedServerScriptPath,
+                                    mcpVersion: info.mcpVersion,
+                                    mcpCommit: info.mcpCommit,
+                                    mcpOriginUrl: info.mcpOriginUrl,
+                                    mcpSourceRepositoryUrl: info.mcpSourceRepositoryUrl,
+                                    mcpSourceArchiveUrl: info.mcpSourceArchiveUrl
                                 },
                                 mcpJsonSnippet: JSON.parse(info.mcpJsonSnippet)
                             },
@@ -277,7 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`No se pudo resolver el runtime MCP: ${message}`);
+                vscode.window.showErrorMessage(rt("mcp.runtime.resolveFailed", message));
             }
         })
     );
@@ -286,7 +294,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand("accessExplorer.searchObjects", async () => {
             const connections = connectionStore.getAll();
             if (connections.length === 0) {
-                vscode.window.showInformationMessage("No hay conexiones Access configuradas.");
+                vscode.window.showInformationMessage(rt("access.connections.none"));
                 return;
             }
 
@@ -294,7 +302,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const picks = await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: "Buscando objetos Access",
+                        title: rt("access.searchObjects.title"),
                         cancellable: false
                     },
                     async () => {
@@ -354,7 +362,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 );
 
                 const selected = await vscode.window.showQuickPick(picks, {
-                    title: "Buscar objeto Access",
+                    title: rt("access.searchObject.title"),
                     matchOnDescription: true,
                     matchOnDetail: true,
                     placeHolder: "Escribe parte del nombre del objeto"
@@ -369,7 +377,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const message = error instanceof Error ? error.message : String(error);
                 const recovered = await offerAccessRestart(message);
                 if (recovered) {
-                    vscode.window.showInformationMessage("Repite la busqueda tras reiniciar Access.");
+                    vscode.window.showInformationMessage(rt("access.retryAfterRestart"));
                     return;
                 }
 
@@ -427,7 +435,7 @@ export function activate(context: vscode.ExtensionContext): void {
                         description: connection.dbPath,
                         connection
                     })),
-                    { title: "Eliminar conexion Access" }
+                    { title: rt("access.removeConnection.title") }
                 );
                 selected = pick?.connection;
             }
@@ -513,7 +521,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const message = error instanceof Error ? error.message : String(error);
                 const recovered = await offerAccessRestart(message);
                 if (recovered) {
-                    vscode.window.showInformationMessage("Vuelve a hacer clic en el objeto para reintentar.");
+                    vscode.window.showInformationMessage(rt("access.retryOpenObject"));
                     return;
                 }
 
@@ -526,7 +534,7 @@ export function activate(context: vscode.ExtensionContext): void {
     async function pickConnection(title?: string): Promise<import("./models/types").AccessConnection | undefined> {
         const connections = connectionStore.getAll();
         if (connections.length === 0) {
-            vscode.window.showInformationMessage("No hay conexiones Access configuradas.");
+            vscode.window.showInformationMessage(rt("access.connections.none"));
             return undefined;
         }
         if (connections.length === 1) {
@@ -590,7 +598,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ): Promise<void> {
         const activeSql = getActiveSqlMeta(editor);
         if (!activeSql) {
-            vscode.window.showInformationMessage("No hay un editor SQL activo.");
+            vscode.window.showInformationMessage(rt("sql.noActiveEditor"));
             return;
         }
 
@@ -757,7 +765,7 @@ export function activate(context: vscode.ExtensionContext): void {
         title: string
     ): Promise<import("./models/types").AccessTableFieldInfo | undefined> {
         if (fields.length === 0) {
-            vscode.window.showWarningMessage("La tabla no tiene campos disponibles para esta operacion.");
+            vscode.window.showWarningMessage(rt("table.noFieldsForOperation"));
             return undefined;
         }
 
@@ -916,7 +924,7 @@ export function activate(context: vscode.ExtensionContext): void {
         mode: "create" | "edit"
     ): Promise<void> {
         if (statements.length === 0) {
-            vscode.window.showInformationMessage("No hay cambios de estructura para aplicar.");
+            vscode.window.showInformationMessage(rt("table.noStructureChanges"));
             return;
         }
 
@@ -1339,7 +1347,7 @@ render();
                 }
             ],
             {
-                title: "Densidad de enlaces SecondBrain",
+                title: rt("secondBrain.linkDensity.title"),
                 placeHolder: "Choose how you want to generate cross-links"
             }
         );
@@ -1487,7 +1495,7 @@ render();
         }
 
         const preview = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Notification, title: "Ejecutando SQL...", cancellable: false },
+            { location: vscode.ProgressLocation.Notification, title: rt("sql.executing"), cancellable: false },
             () => mcpClient.executeRawSqlQuery(connection, trimmed)
         );
         showResultsWebview(preview.sql, connection.name, preview.rows, preview.rowCount);
@@ -1498,7 +1506,7 @@ render();
         vscode.commands.registerCommand("accessExplorer.pickSqlConnection", async () => {
             const connections = connectionStore.getAll();
             if (connections.length === 0) {
-                vscode.window.showInformationMessage("No hay conexiones Access configuradas.");
+                vscode.window.showInformationMessage(rt("access.connections.none"));
                 return;
             }
             const items = connections.map((c) => ({
@@ -1623,7 +1631,7 @@ render();
             }
 
             await openSqlTemplateEditor(connection, buildCreateTableDdlTemplate(tableName.trim()));
-            vscode.window.showInformationMessage("Plantilla DDL abierta. Ajusta el SQL y ejecútalo para crear la tabla.");
+            vscode.window.showInformationMessage(rt("ddl.template.opened"));
         })
     );
 
@@ -1727,7 +1735,7 @@ render();
         vscode.commands.registerCommand("accessExplorer.executeActiveSql", async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
-                vscode.window.showInformationMessage("No hay editor activo con SQL.");
+                vscode.window.showInformationMessage(rt("editor.noActiveSql"));
                 return;
             }
 
@@ -1761,7 +1769,7 @@ render();
         vscode.commands.registerCommand("accessExplorer.saveQueryToAccess", async (node?: any) => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
-                vscode.window.showInformationMessage("No hay editor activo.");
+                vscode.window.showInformationMessage(rt("editor.noActive"));
                 return;
             }
 
@@ -1825,12 +1833,12 @@ render();
         vscode.commands.registerCommand("accessExplorer.saveCodeToAccess", async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
-                vscode.window.showInformationMessage("No hay editor activo.");
+                vscode.window.showInformationMessage(rt("editor.noActive"));
                 return;
             }
             const meta = codeDocuments.get(editor.document.uri.toString());
             if (!meta) {
-                vscode.window.showWarningMessage("Este documento no est\u00e1 asociado a un objeto Access. \u00c1brelo desde el explorador.");
+                vscode.window.showWarningMessage(rt("document.notAccessObject"));
                 return;
             }
             const isProcedure = !!meta.procedureName;
@@ -1903,7 +1911,7 @@ render();
         vscode.commands.registerCommand("accessExplorer.toggleVbComment", async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.document.languageId !== "vb") {
-                vscode.window.showInformationMessage("No hay un editor VBA activo.");
+                vscode.window.showInformationMessage(rt("vba.noActiveEditor"));
                 return;
             }
 
@@ -2157,7 +2165,7 @@ render();
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.createDatabase", async () => {
             const target = await vscode.window.showSaveDialog({
-                title: "Nueva base de datos Access",
+                title: rt("database.new.title"),
                 saveLabel: "Crear base de datos",
                 filters: {
                     "Access Database": ["accdb"]
@@ -2182,7 +2190,7 @@ render();
             await vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: "Creando base de datos Access...",
+                    title: rt("database.creating"),
                     cancellable: false
                 },
                 async () => {
@@ -2223,7 +2231,7 @@ render();
             await vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: "Cerrando Access...",
+                    title: rt("access.closing"),
                     cancellable: false
                 },
                 async () => {
@@ -2304,7 +2312,7 @@ render();
                         detail: category.key,
                         categoryKey: category.key
                     })),
-                    { title: "Seleccionar tipo de objeto para SecondBrain" }
+                    { title: rt("secondBrain.selectObjectType") }
                 );
                 categoryKey = pick?.categoryKey;
             }
@@ -2460,7 +2468,7 @@ render();
                         detail: category.key,
                         categoryKey: category.key
                     })),
-                    { title: "Seleccionar tipo de objeto a exportar" }
+                    { title: rt("export.selectObjectType") }
                 );
                 categoryKey = pick?.categoryKey;
             }
@@ -3150,14 +3158,14 @@ syncMode();
         const code = String(message.code ?? "").trim();
 
         if (mode === "eval" && !code) {
-            vscode.window.showWarningMessage("Introduce una expresi\u00f3n o bloque VBA.");
+            vscode.window.showWarningMessage(rt("vba.console.enterExpression"));
             return;
         }
 
         if (mode === "run") {
             const procedure = String(message.procedure ?? "").trim();
             if (!procedure) {
-                vscode.window.showWarningMessage("Indica el nombre del procedimiento para runVba.");
+                vscode.window.showWarningMessage(rt("vba.console.enterProcedure"));
                 return;
             }
         }
@@ -3634,7 +3642,7 @@ buildBody(ALL_ROWS);
     panel.webview.onDidReceiveMessage(async (msg) => {
         if (msg.command === "copyText") {
             await vscode.env.clipboard.writeText(String(msg.text ?? ""));
-            vscode.window.showInformationMessage("Copiado al portapapeles.");
+            vscode.window.showInformationMessage(rt("clipboard.copied"));
         }
         if (msg.command === "exportCsv") {
             const uri = await vscode.window.showSaveDialog({

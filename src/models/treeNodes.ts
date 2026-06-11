@@ -6,6 +6,7 @@ import {
     AccessTreeActionDefinition,
     AccessTreeActionKind
 } from "./types";
+import { rt } from "../utils/runtimeL10n";
 
 export type AccessTreeNode = ConnectionNode | CategoryNode | ObjectNode | DetailNode | ActionNode | MessageNode;
 
@@ -225,7 +226,7 @@ function iconForObject(categoryKey: AccessCategoryKey): string {
 
 function objectDescription(categoryKey: AccessCategoryKey, objectInfo: AccessObjectInfo): string | undefined {
     if (categoryKey === "references") {
-        return "reference";
+        return rt("tree.description.reference");
     }
 
     if (categoryKey === "relationships") {

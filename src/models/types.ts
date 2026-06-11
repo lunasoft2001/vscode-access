@@ -1,3 +1,5 @@
+import { rt } from "../utils/runtimeL10n";
+
 export type AccessCategoryKey =
     | "tables"
     | "queries"
@@ -109,31 +111,31 @@ export const ACCESS_CATEGORY_ACTIONS: Partial<Record<AccessCategoryKey, AccessTr
     tables: [
         {
             kind: "createTableDesigner",
-            label: "Nueva tabla guiada...",
+            label: rt("tree.action.newGuidedTable"),
             command: "accessExplorer.createTableDesigner",
-            description: "Abrir un diseñador guiado para crear una tabla"
+            description: rt("tree.action.newGuidedTable.desc")
         },
         {
             kind: "createTableDdl",
-            label: "Nueva tabla DDL...",
+            label: rt("tree.action.newDdlTable"),
             command: "accessExplorer.createTableDdl",
-            description: "Abrir una plantilla SQL DDL para crear una tabla"
+            description: rt("tree.action.newDdlTable.desc")
         }
     ],
     modules: [
         {
             kind: "createModule",
-            label: "Nuevo modulo...",
+            label: rt("tree.action.newModule"),
             command: "accessExplorer.createModule",
-            description: "Crear un modulo VBA"
+            description: rt("tree.action.newModule.desc")
         }
     ],
     queries: [
         {
             kind: "newQuery",
-            label: "Nueva consulta guardada...",
+            label: rt("tree.action.newSavedQuery"),
             command: "accessExplorer.newQuery",
-            description: "Abrir un editor SQL para una consulta guardada de Access"
+            description: rt("tree.action.newSavedQuery.desc")
         }
     ]
 };
@@ -142,54 +144,54 @@ export const ACCESS_OBJECT_ACTIONS: Partial<Record<AccessCategoryKey, AccessTree
     tables: [
         {
             kind: "editTableDesigner",
-            label: "Editar tabla guiada...",
+            label: rt("tree.action.editGuidedTable"),
             command: "accessExplorer.editTableDesigner",
-            description: "Abrir un diseñador guiado para modificar esta tabla"
+            description: rt("tree.action.editGuidedTable.desc")
         },
         {
             kind: "editTableDdl",
-            label: "Editar tabla DDL...",
+            label: rt("tree.action.editDdlTable"),
             command: "accessExplorer.editTableDdl",
-            description: "Abrir una plantilla SQL DDL para modificar esta tabla"
+            description: rt("tree.action.editDdlTable.desc")
         }
     ],
     modules: [
         {
             kind: "compileModule",
-            label: "Compilar modulo",
+            label: rt("tree.action.compileModule"),
             command: "accessExplorer.compileModule",
-            description: "Compilar solo este modulo"
+            description: rt("tree.action.compileModule.desc")
         },
         {
             kind: "deleteModule",
-            label: "Eliminar modulo",
+            label: rt("tree.action.deleteModule"),
             command: "accessExplorer.deleteModule",
-            description: "Eliminar este modulo VBA"
+            description: rt("tree.action.deleteModule.desc")
         }
     ],
     queries: [
         {
             kind: "saveQueryToAccess",
-            label: "Guardar consulta en Access",
+            label: rt("tree.action.saveQuery"),
             command: "accessExplorer.saveQueryToAccess",
-            description: "Guardar el SQL editado como QueryDef"
+            description: rt("tree.action.saveQuery.desc")
         },
         {
             kind: "deleteQuery",
-            label: "Eliminar consulta",
+            label: rt("tree.action.deleteQuery"),
             command: "accessExplorer.deleteQuery",
-            description: "Eliminar esta consulta guardada"
+            description: rt("tree.action.deleteQuery.desc")
         }
     ]
 };
 
 export const ACCESS_CATEGORIES: AccessCategory[] = [
-    { key: "tables", label: "Tablas", toolObjectType: "table" },
-    { key: "queries", label: "Consultas", toolObjectType: "query" },
-    { key: "forms", label: "Formularios", toolObjectType: "form" },
-    { key: "reports", label: "Informes", toolObjectType: "report" },
-    { key: "macros", label: "Macros", toolObjectType: "macro" },
-    { key: "modules", label: "Modulos/VBA", toolObjectType: "module" },
-    { key: "relationships", label: "Relaciones" },
-    { key: "references", label: "Referencias VBA" }
+    { key: "tables", label: rt("tree.category.tables"), toolObjectType: "table" },
+    { key: "queries", label: rt("tree.category.queries"), toolObjectType: "query" },
+    { key: "forms", label: rt("tree.category.forms"), toolObjectType: "form" },
+    { key: "reports", label: rt("tree.category.reports"), toolObjectType: "report" },
+    { key: "macros", label: rt("tree.category.macros"), toolObjectType: "macro" },
+    { key: "modules", label: rt("tree.category.modules"), toolObjectType: "module" },
+    { key: "relationships", label: rt("tree.category.relationships") },
+    { key: "references", label: rt("tree.category.references") }
 ];

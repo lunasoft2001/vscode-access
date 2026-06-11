@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.2 - 2026-06-11
+- **MCP updates without Git**: Extension now automatically downloads and installs MCP-Access updates via ZIP even when Git is not installed, instead of silently skipping updates.
+- **Timeout protection**: Added 5-minute (300s) timeout to `Invoke-WebRequest` downloads to prevent VS Code from hanging on slow networks.
+- **ZIP integrity validation**: Downloads are now validated to ensure file exists and is not corrupted (minimum 10KB).
+- **Automatic backup & recovery**: Extension creates timestamped backup of current MCP-Access before downloading updates; if download fails, automatically restores from backup to ensure zero downtime.
+- **Enhanced logging**: Added detailed progress messages for update process in Output channel.
+
 ## 1.1.1 - 2026-06-01
 - MCP runtime auto-repair: migrates legacy `MCP-Access-main` to `MCP-Access` and normalizes partial/duplicated folder states.
 - ZIP installer hardened: validates extracted folder and `access_mcp_server.py` before continuing setup.
