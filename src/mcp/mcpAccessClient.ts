@@ -188,26 +188,136 @@ export class McpAccessClient {
 
         const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
         if (!hasGitMetadata) {
+            const zipVersion = this.tryExtractMcpVersionFromFiles(repoDir);
             return {
-                version: "desconocida (instalado por ZIP)",
+                version: zipVersion || "desconocida (instalado por ZIP)",
                 commit: "n/a",
                 originUrl: MCP_ACCESS_ARCHIVE_URL
             };
         }
 
-        const [tagResult, commitResult, originResult] = await Promise.all([
+        const [tagResult, commitResult, logResult, originResult] = await Promise.all([
             this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--abbrev=0"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
+            this.runCommand("git", ["-C", repoDir, "log", "-1", "--format=%s"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
         ]);
 
+        // Try to extract version from commit message (e.g., "v0.7.43: wedged-session detection")
+        let version = "sin tag";
+        if (tagResult.exitCode === 0) {
+            version = tagResult.stdout || "sin tag";
+        } else if (logResult.exitCode === 0) {
+            const commitMsg = logResult.stdout || "";
+            const versionMatch = commitMsg.match(/v\d+\.\d+\.\d+/);
+            if (versionMatch) {
+                version = versionMatch[0];
+            } else {
+                // Fallback to commit hash if no version pattern found
+                version = `commit ${commitResult.stdout || "n/a"}`;
+            }
+        }
+
         return {
-            version: tagResult.exitCode === 0 ? (tagResult.stdout || "sin tag") : "sin tag",
+            version,
             commit: commitResult.exitCode === 0 ? (commitResult.stdout || "n/a") : "n/a",
             originUrl: originResult.exitCode === 0
                 ? (originResult.stdout || MCP_ACCESS_REPOSITORY_URL)
                 : MCP_ACCESS_REPOSITORY_URL
         };
+    }
+
+    async switchManagedRuntimeToGit(): Promise<void> {
+        const baseDir = this.getManagedRuntimeBaseDir();
+        const repoDir = path.join(baseDir, "MCP-Access");
+
+        if (!fs.existsSync(repoDir)) {
+            throw new Error("El runtime MCP no está instalado todavía. Conéctate una vez para instalarlo.");
+        }
+
+        const gitAvailable = await this.commandAvailable("git", ["--version"]);
+        if (!gitAvailable) {
+            throw new Error("Git no está disponible en este sistema.");
+        }
+
+        const initResult = await this.runCommand("git", ["-C", repoDir, "init"], undefined, true);
+        if (initResult.exitCode !== 0) {
+            throw new Error(`No se pudo inicializar git en el runtime MCP. ${initResult.stderr || initResult.stdout}`);
+        }
+
+        const originResult = await this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true);
+        if (originResult.exitCode !== 0) {
+            const addOrigin = await this.runCommand(
+                "git",
+                ["-C", repoDir, "remote", "add", "origin", MCP_ACCESS_REPOSITORY_URL],
+                undefined,
+                true
+            );
+            if (addOrigin.exitCode !== 0) {
+                throw new Error(`No se pudo configurar el remoto origin. ${addOrigin.stderr || addOrigin.stdout}`);
+            }
+        } else if ((originResult.stdout || "").trim() !== MCP_ACCESS_REPOSITORY_URL) {
+            const setOrigin = await this.runCommand(
+                "git",
+                ["-C", repoDir, "remote", "set-url", "origin", MCP_ACCESS_REPOSITORY_URL],
+                undefined,
+                true
+            );
+            if (setOrigin.exitCode !== 0) {
+                throw new Error(`No se pudo actualizar el remoto origin. ${setOrigin.stderr || setOrigin.stdout}`);
+            }
+        }
+
+        const fetchResult = await this.runCommand("git", ["-C", repoDir, "fetch", "origin", "main"], undefined, true);
+        if (fetchResult.exitCode !== 0) {
+            throw new Error(`No se pudo descargar la rama main desde origin. ${fetchResult.stderr || fetchResult.stdout}`);
+        }
+
+        const checkoutResult = await this.runCommand(
+            "git",
+            ["-C", repoDir, "checkout", "-f", "-B", "main", "origin/main"],
+            undefined,
+            true
+        );
+        if (checkoutResult.exitCode !== 0) {
+            throw new Error(`No se pudo dejar el runtime MCP en seguimiento de origin/main. ${checkoutResult.stderr || checkoutResult.stdout}`);
+        }
+
+        const pullResult = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
+        if (pullResult.exitCode !== 0) {
+            this.output.appendLine(`Aviso: git pull --ff-only falló tras migrar a Git. ${pullResult.stderr || pullResult.stdout}`);
+        }
+    }
+
+    private tryExtractMcpVersionFromFiles(repoDir: string): string | undefined {
+        const candidateFiles = [
+            path.join(repoDir, "README.md"),
+            path.join(repoDir, "readme.md"),
+            path.join(repoDir, "CLAUDE.md")
+        ];
+
+        for (const filePath of candidateFiles) {
+            if (!fs.existsSync(filePath)) {
+                continue;
+            }
+
+            try {
+                const content = fs.readFileSync(filePath, "utf8");
+                const changelogVersionMatch = content.match(/###\s+(v\d+\.\d+\.\d+)\b/i);
+                if (changelogVersionMatch?.[1]) {
+                    return changelogVersionMatch[1];
+                }
+
+                const genericVersionMatch = content.match(/\b(v\d+\.\d+\.\d+)\b/i);
+                if (genericVersionMatch?.[1]) {
+                    return genericVersionMatch[1];
+                }
+            } catch {
+                // ignore unreadable files and try next candidate
+            }
+        }
+
+        return undefined;
     }
 
     async disconnect(): Promise<void> {

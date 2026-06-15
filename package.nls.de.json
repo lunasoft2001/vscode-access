@@ -10,6 +10,7 @@
     "command.reconnect.title": "Access: MCP neu verbinden",
     "command.restartProcesses.title": "Access: Access-Prozesse neu starten",
     "command.showMcpRuntime.title": "Access: MCP-Runtime anzeigen",
+    "command.switchMcpRuntimeToGit.title": "Access: MCP-Runtime auf Git umstellen",
     "command.registerMcpServer.title": "Access: MCP-Server in VS Code registrieren",
     "command.searchObjects.title": "Access: Objekte suchen",
     "command.showDetails.title": "Access: Objektdetails anzeigen",

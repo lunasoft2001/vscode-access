@@ -219,6 +219,55 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
+    const switchManagedMcpRuntimeToGit = async (): Promise<void> => {
+        try {
+            const updatedInfo = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: rt("mcp.runtime.switchingToGit"),
+                    cancellable: false
+                },
+                async () => {
+                    await mcpClient.switchManagedRuntimeToGit();
+                    return mcpClient.getMcpRuntimeInfo();
+                }
+            );
+
+            vscode.window.showInformationMessage(
+                rt("mcp.runtime.switchToGit.success", updatedInfo.mcpVersion, updatedInfo.mcpCommit)
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+
+            if (/git no est[aá] disponible|git is not available/i.test(message)) {
+                const action = await vscode.window.showErrorMessage(
+                    rt("mcp.runtime.switchToGit.failed", message),
+                    rt("git.install"),
+                    rt("git.copyWinget")
+                );
+
+                if (action === rt("git.install")) {
+                    await vscode.env.openExternal(vscode.Uri.parse("https://git-scm.com/download/win"));
+                    return;
+                }
+
+                if (action === rt("git.copyWinget")) {
+                    await vscode.env.clipboard.writeText("winget install --id Git.Git -e --source winget");
+                    vscode.window.showInformationMessage(rt("git.wingetCopied"));
+                    return;
+                }
+            }
+
+            vscode.window.showErrorMessage(rt("mcp.runtime.switchToGit.failed", message));
+        }
+    };
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.switchMcpRuntimeToGit", async () => {
+            await switchManagedMcpRuntimeToGit();
+        })
+    );
+
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.showMcpRuntime", async () => {
             try {
@@ -244,7 +293,8 @@ export function activate(context: vscode.ExtensionContext): void {
                     rt("mcp.runtime.resolved", info.mcpVersion),
                     rt("mcp.runtime.copySnippet"),
                     rt("mcp.runtime.openFolder"),
-                    rt("mcp.runtime.viewDetail")
+                    rt("mcp.runtime.viewDetail"),
+                    rt("mcp.runtime.switchToGit")
                 );
 
                 if (action === rt("mcp.runtime.copySnippet")) {
@@ -282,6 +332,11 @@ export function activate(context: vscode.ExtensionContext): void {
                     });
                     await vscode.window.showTextDocument(doc, { preview: false });
                     vscode.window.showInformationMessage(summary);
+                    return;
+                }
+
+                if (action === rt("mcp.runtime.switchToGit")) {
+                    await switchManagedMcpRuntimeToGit();
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);

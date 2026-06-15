@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.6 - 2026-06-15
+- **Installation docs clarified**: Simplified the prerequisites and installation flow so Marketplace install, VSIX install, first-run MCP setup, and advanced manual MCP setup are easier to follow.
+
+## 1.1.5 - 2026-06-15
+- **ZIP runtime version visibility**: `Access: Show MCP Runtime` now tries to read MCP version from local runtime files (`README.md` / `CLAUDE.md`) when `.git` metadata is missing, avoiding "desconocida (instalado por ZIP)" in common ZIP-based installs.
+
+## 1.1.4 - 2026-06-11
+- **MCP version detection improved**: `Access: Show MCP Runtime` now extracts version from commit messages when Git tags are not available (e.g., displays "v0.7.43" from commit "v0.7.43: wedged-session detection..."), providing better visibility into the MCP-Access build.
+
+## 1.1.3 - 2026-06-11
+- Release bump to publish the latest Access Explorer fixes to Marketplace.
+
 ## 1.1.2 - 2026-06-11
 - **MCP updates without Git**: Extension now automatically downloads and installs MCP-Access updates via ZIP even when Git is not installed, instead of silently skipping updates.
 - **Timeout protection**: Added 5-minute (300s) timeout to `Invoke-WebRequest` downloads to prevent VS Code from hanging on slow networks.

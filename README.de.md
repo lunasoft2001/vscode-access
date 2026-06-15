@@ -26,27 +26,58 @@
 | Anforderung | Details |
 |-------------|---------|
 | Windows | Von Microsoft Access benötigt |
-| Microsoft Access | 2016 oder neuer |
+| Microsoft Access | 2010 oder neuer (jede Version mit VBE-Unterstuetzung) |
 | Python 3.9+ | Zum Starten des MCP-Servers erforderlich |
 | VBA-Zugriff in Access | `Trust access to the VBA project object model` im Trust Center aktivieren |
-| [MCP-Access](https://github.com/unmateria/MCP-Access) | Externer MCP-Server (Python-Prozess), der automatisch von der Erweiterung gestartet wird |
+| [MCP-Access](https://github.com/unmateria/MCP-Access) | Wird beim ersten Verwenden automatisch von der Erweiterung verwaltet; die manuelle Einrichtung ist nur für fortgeschrittene Fälle (siehe Installation) |
 
-### MCP-Access — Automatische Installation
+---
 
-**Die Erweiterung installiert und konfiguriert MCP-Access automatisch**, wenn zum ersten Mal eine Verbindung zu einer Datenbank hergestellt wird. Der Server wird heruntergeladen, eine Python-Virtualenv erstellt und alle erforderlichen Abhängigkeiten ohne manuelle Schritte installiert.
+## Installation
 
-> Python 3.9+ muss auf dem System verfügbar sein (oder über `winget` installierbar sein), damit die automatische Einrichtung funktioniert.
+Installiere zuerst die Erweiterung. Für die normale Nutzung musst du **MCP-Access nicht separat installieren**: Beim ersten Verbinden mit einer Datenbank richtet die Erweiterung den MCP-Runtime automatisch ein.
 
-In Microsoft Access aktivieren:
+### Option A — Aus dem Marketplace installieren (empfohlen)
 
-```text
-Datei > Optionen > Trust Center > Einstellungen für das Trust Center > Makroeinstellungen > Trust access to the VBA project object model
+1. Öffne VS Code und installiere **Access Explorer** über die Erweiterungen-Ansicht.
+2. Öffne eine `.accdb`-Datei und führe **Access: Add Connection** aus.
+3. Erlaube bei Nachfrage die automatische Installation des MCP-Runtimes.
+
+### Option B — Aus einer VSIX-Datei installieren
+
+1. `access-explorer-x.x.x.vsix` aus dem Bereich [Releases](../../releases) herunterladen.
+2. In VS Code: **Erweiterungen → ··· → Aus VSIX installieren...** und Datei auswählen.
+3. Oder über das Terminal:
+```powershell
+code --install-extension access-explorer-x.x.x.vsix
 ```
 
-> Die Erweiterung versucht, diese Einstellung auch automatisch während der Ersteinrichtung zu aktivieren.
+### Option C — Aus dem Quellcode erstellen
+
+```powershell
+git clone https://github.com/lunasoft2001/vscode-access.git
+cd vscode-access
+npm install
+npm run compile
+npx vsce package        # erstellt die .vsix-Datei
+code --install-extension access-explorer-x.x.x.vsix
+```
+
+Erfordert Node.js 18+ und `@vscode/vsce` (`npm install -g @vscode/vsce`).
+
+### Erster Start
+
+Beim ersten Verbinden mit einer Datenbank richtet Access Explorer den MCP-Runtime automatisch ein:
+
+1. MCP-Access wird heruntergeladen.
+2. Eine Python-Virtualenv wird erstellt.
+3. Die erforderlichen Pakete werden installiert.
+4. Der MCP-Runtime wird im von der Erweiterung verwalteten Ordner abgelegt.
+
+Wenn Python oder Git fehlen, zeigt die Erweiterung geführte Wiederherstellungsaktionen an, statt still zu scheitern.
 
 <details>
-<summary>Manuelle Installation (nur wenn die automatische Installation fehlschlägt)</summary>
+<summary>Manuelle MCP-Installation (nur wenn die automatische Einrichtung fehlschlägt oder wenn du einen separaten Runtime willst)</summary>
 
 Server klonen oder herunterladen von [github.com/unmateria/MCP-Access](https://github.com/unmateria/MCP-Access):
 
@@ -70,32 +101,6 @@ py -3 -m venv .venv
 Anschließend `accessExplorer.mcp.serverScriptPath` in den VS Code-Einstellungen auf den vollständigen Pfad zu `access_mcp_server.py` setzen.
 
 </details>
-
----
-
-## Installation
-
-### Option A — Aus VSIX-Datei (empfohlen)
-
-1. `access-explorer-x.x.x.vsix` aus dem Bereich [Releases](../../releases) herunterladen.
-2. In VS Code: **Erweiterungen → ··· → Aus VSIX installieren...** und Datei auswählen.
-3. Oder über das Terminal:
-```powershell
-code --install-extension access-explorer-x.x.x.vsix
-```
-
-### Option B — Aus dem Quellcode erstellen
-
-```powershell
-git clone https://github.com/lunasoft2001/vscode-access.git
-cd vscode-access
-npm install
-npm run compile
-npx vsce package        # erstellt die .vsix-Datei
-code --install-extension access-explorer-x.x.x.vsix
-```
-
-Erfordert Node.js 18+ und `@vscode/vsce` (`npm install -g @vscode/vsce`).
 
 ---
 
@@ -129,8 +134,9 @@ Nach der Installation sind folgende Einstellungen in den VS Code **Einstellungen
 Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
 Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.1.4**: MCP-Versionserkennung verbessert — extrahiert jetzt die Version aus Commit-Nachrichten, wenn Git-Tags nicht verfügbar sind (z. B. "v0.7.43"), wodurch Benutzer bessere Sichtbarkeit des MCP-Builds erhalten.
+- **v1.1.3**: Marketplace-Release-Bump für die neuesten Access Explorer-Fixes.
 - **v1.0.14**: Fuegt den Befehl `Access: MCP-Runtime anzeigen` mit kopierbarem `mcp.json`-Block und Runtime-Ordner-Ansicht hinzu.
-- **v1.0.13**: Installiert `Pillow` automatisch bei fehlendem PIL fuer Screenshots; gefuehrter Reparaturablauf bei fehlendem `mcp_access`-Modul.
 - **v1.0.12**: Aktiviert den VBA-Zugriff im Access Trust Center (`AccessVBOM`) beim Setup automatisch (best effort).
 - **v1.0.11**: Verwendet standardmäßig einen von der Erweiterung verwalteten MCP-Runtime-Speicher (`globalStorage`).
 - **v1.0.10**: Fügt ZIP-Fallback für MCP-Access hinzu, wenn Git nicht verfügbar ist.

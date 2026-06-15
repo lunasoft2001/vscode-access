@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.1.2",
+    "version": "1.1.6",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
@@ -30,6 +30,7 @@
         "onCommand:accessExplorer.refresh",
         "onCommand:accessExplorer.reconnect",
         "onCommand:accessExplorer.showMcpRuntime",
+        "onCommand:accessExplorer.switchMcpRuntimeToGit",
         "onCommand:accessExplorer.restartAccessProcesses",
         "onCommand:accessExplorer.registerMcpServer",
         "onCommand:accessExplorer.searchObjects",
@@ -112,6 +113,11 @@
                 "command": "accessExplorer.showMcpRuntime",
                 "title": "%command.showMcpRuntime.title%",
                 "icon": "$(server-process)"
+            },
+            {
+                "command": "accessExplorer.switchMcpRuntimeToGit",
+                "title": "%command.switchMcpRuntimeToGit.title%",
+                "icon": "$(source-control)"
             },
             {
                 "command": "accessExplorer.registerMcpServer",
