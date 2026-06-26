@@ -7,17 +7,28 @@
 
 ---
 
-## Funktionen
+Access Explorer richtet sich an Teams und Entwickler, die echte Access-Projekte pflegen und dabei die modernen Editor-Workflows von VS Code nutzen wollen.
 
-- Mehrere Verbindungen zu `.accdb` / `.mdb`-Datenbanken
-- Objektbaum je Verbindung: Tabellen, Abfragen, Formulare, Berichte, Makros, VBA-Module, Beziehungen, Referenzen
-- Integrierter SQL-Editor mit Ergebnisraster (sortieren, filtern, kopieren, CSV-Export)
-- CRUD-Unterstützung: INSERT / UPDATE / DELETE mit Bestätigungsdialog
-- VBA-Code direkt in Access bearbeiten und speichern
-- Eigenschaften von Formular-/Berichtssteuerelementen bearbeiten
-- VBA kompilieren und Fehler im Editor anzeigen
-- Datenbank komprimieren und reparieren
-- Benutzeroberfläche auf **Englisch**, **Deutsch** und **Spanisch** (folgt der VS Code-Anzeigesprache)
+## Was Du Damit Machen Kannst
+
+- **Schnell erkunden**: mehrere `.accdb` / `.mdb`-Dateien verbinden und einen vollständigen Objektbaum nutzen (Tabellen, Abfragen, Formulare, Berichte, Makros, VBA-Module, Beziehungen, Referenzen).
+- **SQL sicher ausführen**: einzelne SQL-Statements oder Batch-Skripte ausführen, mit Bestätigung bei destruktiven Operationen.
+- **Daten übertragen**: Tabellen per CSV/XLSX importieren oder exportieren.
+- **VBA komfortabel pflegen**: Code in VS Code öffnen, bearbeiten, zurück nach Access speichern, kompilieren und Fehler prüfen.
+- **Refactoring mit Transparenz**: Verwendungen über VBA, gespeicherte Abfragen und Steuerelement-Eigenschaften finden.
+- **Datenbanken stabil halten**: Komprimieren/Reparieren ausführen und MCP-Runtime-Status/Version prüfen.
+- **Mehrsprachig arbeiten**: UI in **Englisch**, **Deutsch** und **Spanisch** (entsprechend der VS Code-Sprache).
+
+---
+
+## In 30 Sekunden
+
+1. Öffne die **Access**-Ansicht in der Aktivitätsleiste.
+2. Starte **Access: Add Connection** und wähle eine `.accdb`-Datei.
+3. Klappe Objekte auf und öffne eine Abfrage oder ein Modul.
+4. Für SQL: nutze **Access: Temporäre SQL-Abfrage** oder **Access: SQL-Abfrage ausführen**.
+5. Für VBA: bearbeiten, dann **Access: Code in Access speichern**, danach **Access: Modul kompilieren**.
+6. Für Datenaustausch: **Access: Daten importieren/exportieren** ausführen.
 
 ---
 
@@ -118,14 +129,45 @@ Nach der Installation sind folgende Einstellungen in den VS Code **Einstellungen
 
 ---
 
-## Schnellstart
+## Typische Workflows
 
-1. Die **Access**-Ansicht in der Aktivitätsleiste öffnen (Mond-Symbol).
-2. **Access: Add Connection** klicken und eine `.accdb`-Datei auswählen.
-3. Kategorien aufklappen, um Datenbankobjekte zu erkunden.
-4. Rechtsklick auf eine Verbindung für **VBA kompilieren** oder **Komprimieren und reparieren**.
-5. Ein VBA-Modul öffnen → bearbeiten → mit **Access: Save Code to Access** speichern (Upload-Symbol in der Editor-Symbolleiste).
-6. SQL-Editor öffnen (**Access: New SQL Query**), Abfrage schreiben und mit der Schaltfläche ▶ ausführen.
+### 1) SQL-Wartung und Diagnose
+
+1. Öffne **Access: Temporäre SQL-Abfrage**.
+2. Führe einzelne Statements oder mehrere Statements als Batch aus.
+3. Prüfe Ergebnisraster oder Batch-Bericht.
+
+### 2) VBA bearbeiten-kompilieren Schleife
+
+1. Öffne ein Modul/Formular/Bericht aus dem Baum.
+2. Bearbeite den Code in VS Code.
+3. Speichere mit **Access: Code in Access speichern**.
+4. Kompiliere mit **Access: Modul kompilieren** oder **Access: VBA kompilieren**.
+
+### 3) Datenmigration mit CSV/XLSX
+
+1. Starte **Access: Daten importieren/exportieren**.
+2. Wähle Import oder Export.
+3. Wähle Tabelle, Datei und Optionen (Kopfzeilen, Bereich/Spec je nach Typ).
+4. Prüfe den erzeugten Bericht.
+
+---
+
+## Befehlsübersicht
+
+| Befehl | Zweck |
+|--------|-------|
+| `Access: Add Connection` | Neue Access-Datenbank verbinden |
+| `Access: Objekte suchen` | Objekte schnell finden und öffnen |
+| `Access: Verwendungen suchen` | Text in VBA, Abfragen und Steuerelement-Eigenschaften suchen |
+| `Access: Temporäre SQL-Abfrage` | Temporären SQL-Editor öffnen |
+| `Access: SQL-Abfrage ausführen` | SQL direkt ausführen |
+| `Access: Aktives SQL ausführen` | Auswahl (oder ganzes SQL-Dokument) ausführen |
+| `Access: Daten importieren/exportieren` | Tabellendaten via CSV/XLSX übertragen |
+| `Access: Code in Access speichern` | VBA/Form/Report-Code zurück nach Access schreiben |
+| `Access: Modul kompilieren` / `Access: VBA kompilieren` | VBA validieren und Fehler anzeigen |
+| `Access: Komprimieren und reparieren` | Wartung und Bereinigung der Datenbankdatei |
+| `Access: MCP-Runtime anzeigen` | Runtime-Pfad/Version/Quelle und Update-Status prüfen |
 
 ---
 
@@ -134,6 +176,7 @@ Nach der Installation sind folgende Einstellungen in den VS Code **Einstellungen
 Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
 Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.2.0**: Umfassende Überarbeitung der Marketplace-Dokumentation und klareres Onboarding (Was Du machen kannst, 30-Sekunden-Start, Workflows, Befehlsübersicht). Bessere Sichtbarkeit neuer Funktionen wie SQL-Batch-Ausführung, CSV/XLSX-Datenübertragung und Verwendungen suchen.
 - **v1.1.4**: MCP-Versionserkennung verbessert — extrahiert jetzt die Version aus Commit-Nachrichten, wenn Git-Tags nicht verfügbar sind (z. B. "v0.7.43"), wodurch Benutzer bessere Sichtbarkeit des MCP-Builds erhalten.
 - **v1.1.3**: Marketplace-Release-Bump für die neuesten Access Explorer-Fixes.
 - **v1.0.14**: Fuegt den Befehl `Access: MCP-Runtime anzeigen` mit kopierbarem `mcp.json`-Block und Runtime-Ordner-Ansicht hinzu.

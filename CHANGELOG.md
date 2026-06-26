@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.2.0 - 2026-06-26
+- **Marketplace docs overhaul**: Reworked README content for clearer onboarding and discoverability (value proposition, 30-second start, common workflows, command cheat sheet).
+- **MCP parity improvements**: Added extension support for SQL batch execution flow and data transfer operations (CSV/XLSX import/export).
+- **Cross-reference search**: Added usage search workflow across VBA, query SQL, and control properties (Find Usages + search queries integration).
+
 ## 1.1.6 - 2026-06-15
 - **Installation docs clarified**: Simplified the prerequisites and installation flow so Marketplace install, VSIX install, first-run MCP setup, and advanced manual MCP setup are easier to follow.
 

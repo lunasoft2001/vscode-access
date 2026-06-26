@@ -176,6 +176,7 @@ Una vez instalada, los siguientes ajustes están disponibles en **Ajustes** de V
 Este README incluye ahora un resumen corto de cambios por versión.
 Para el detalle completo, consulta [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.2.0**: Revisión completa de la documentación de Marketplace y onboarding más claro (Qué Puedes Hacer, guía en 30 segundos, flujos y tabla de comandos). Mejora la visibilidad de funciones como ejecución SQL en lote, transferencia CSV/XLSX y Buscar usos.
 - **v1.1.4**: Detección de versión MCP mejorada — ahora extrae la versión de los mensajes de commit cuando no hay tags de Git (p. ej., "v0.7.43"), dando a los usuarios mejor visibilidad del build de MCP.
 - **v1.1.3**: Marketplace release bump para publicar los últimos fixes de Access Explorer.
 - **v1.0.18**: Endurece la instalación en Windows/ARM64 forzando wheel binaria para `cryptography`; añade reintento automático tras errores de compilación y guía manual sin Git (ZIP).
