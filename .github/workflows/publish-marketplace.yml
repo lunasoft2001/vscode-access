@@ -5,6 +5,16 @@ on:
     branches:
       - master
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publicar en Marketplace (false = solo validaciones)"
+        required: true
+        default: false
+        type: boolean
+      expected_version:
+        description: "Version esperada (opcional, ejemplo: 1.2.0)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -33,8 +43,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Compile extension
-        run: npm run compile
+      - name: Preflight checks (safe CI environment)
+        run: npm run release:preflight
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: access-explorer-vsix
+          path: .artifacts/access-explorer.vsix
 
       - name: Detect version change
         id: version
@@ -70,6 +86,16 @@ jobs:
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
+      - name: Validate expected version (manual runs)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.expected_version != ''
+        run: |
+          EXPECTED="${{ github.event.inputs.expected_version }}"
+          ACTUAL="${{ steps.version.outputs.new_version }}"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::La version esperada ($EXPECTED) no coincide con package.json ($ACTUAL)."
+            exit 1
+          fi
+
       - name: Guard workflow file changes
         id: guard
         run: |
@@ -90,8 +116,26 @@ jobs:
             echo "safe=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Decide publish mode
+        id: publish_mode
+        run: |
+          SHOULD="false"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.publish }}" = "true" ]; then
+              SHOULD="true"
+            fi
+          else
+            if [ "${{ steps.version.outputs.version_changed }}" = "true" ] && [ "${{ steps.guard.outputs.safe }}" = "true" ]; then
+              SHOULD="true"
+            fi
+          fi
+
+          echo "should_publish=$SHOULD" >> "$GITHUB_OUTPUT"
+          echo "Publish mode: $SHOULD"
+
       - name: Validate VSCE_PAT
-        if: (github.event_name == 'workflow_dispatch' || steps.version.outputs.version_changed == 'true') && steps.guard.outputs.safe == 'true'
+        if: steps.publish_mode.outputs.should_publish == 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
@@ -100,16 +144,13 @@ jobs:
             exit 1
           fi
 
-      - name: Install vsce
-        run: npm install -g @vscode/vsce
-
       - name: Publish to VS Marketplace
-        if: (github.event_name == 'workflow_dispatch' || steps.version.outputs.version_changed == 'true') && steps.guard.outputs.safe == 'true'
+        if: steps.publish_mode.outputs.should_publish == 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           set +e
-          OUTPUT=$(vsce publish -p "$VSCE_PAT" 2>&1)
+          OUTPUT=$(npx @vscode/vsce publish --packagePath .artifacts/access-explorer.vsix -p "$VSCE_PAT" 2>&1)
           EXIT_CODE=$?
           set -e
 
@@ -128,10 +169,11 @@ jobs:
           echo "::error::Falló la publicación en Marketplace"
           exit $EXIT_CODE
 
-      - name: Skip publish info
-        if: github.event_name != 'workflow_dispatch' && (steps.version.outputs.version_changed != 'true' || steps.guard.outputs.safe != 'true')
+      - name: Publish summary
+        if: always()
         run: |
-          echo "No se publica: no cambió la versión o el push incluyó cambios de workflow."
+          echo "Resultado preflight: OK (compile + smoke + vsix)."
           echo "Version anterior: ${{ steps.version.outputs.old_version }}"
           echo "Version actual:  ${{ steps.version.outputs.new_version }}"
           echo "Safe publish:    ${{ steps.guard.outputs.safe }}"
+          echo "Should publish:  ${{ steps.publish_mode.outputs.should_publish }}"

@@ -568,7 +568,10 @@
     "scripts": {
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
-        "vscode:prepublish": "npm run compile"
+        "vscode:prepublish": "npm run compile",
+        "test:smoke": "node ./scripts/smoke-release-checks.js",
+        "package:ci": "node -e \"require('node:fs').mkdirSync('.artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out .artifacts/access-explorer.vsix",
+        "release:preflight": "npm run compile && npm run test:smoke && npm run package:ci"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0"
