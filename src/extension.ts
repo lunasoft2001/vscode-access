@@ -125,6 +125,47 @@ export function activate(context: vscode.ExtensionContext): void {
         };
     }
 
+    let mcpUpdateNoticeShown = false;
+
+    async function maybeNotifyMcpUpdate(): Promise<void> {
+        if (mcpUpdateNoticeShown) {
+            return;
+        }
+
+        try {
+            const updateInfo = await mcpClient.checkManagedMcpUpdate();
+            if (!updateInfo || !updateInfo.updateAvailable) {
+                return;
+            }
+
+            mcpUpdateNoticeShown = true;
+            const action = await vscode.window.showInformationMessage(
+                rt("mcp.update.available", updateInfo.installedVersion, updateInfo.latestVersion),
+                rt("mcp.update.now"),
+                rt("mcp.update.later")
+            );
+
+            if (action !== rt("mcp.update.now")) {
+                return;
+            }
+
+            const updated = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: rt("mcp.update.progress"),
+                    cancellable: false
+                },
+                async () => mcpClient.updateManagedMcpRuntime()
+            );
+
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(rt("mcp.update.success", updated.mcpVersion));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showWarningMessage(rt("mcp.update.checkFailed", message));
+        }
+    }
+
     context.subscriptions.push(sqlStatusBar);
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => {
         void updateEditorActionContexts();
@@ -147,6 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
         async () => {
             try {
                 await mcpClient.ensurePrerequisites();
+                await maybeNotifyMcpUpdate();
                 treeProvider.refresh();
                 await registerMcpServerSilently(context, mcpClient);
             } catch {
@@ -354,6 +396,123 @@ export function activate(context: vscode.ExtensionContext): void {
             }
 
             try {
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.findUsages", async (node?: any) => {
+            const connection = node?.connection ?? await pickConnection("Seleccionar base de datos para buscar usos");
+            if (!connection) {
+                return;
+            }
+
+            const searchText = await vscode.window.showInputBox({
+                title: "Buscar usos",
+                prompt: "Texto o patron regex a buscar",
+                placeHolder: "Ejemplo: DLookup|MiFuncionPublica"
+            });
+
+            if (!searchText?.trim()) {
+                return;
+            }
+
+            const scopePick = await vscode.window.showQuickPick(
+                [
+                    {
+                        label: "Busqueda global",
+                        description: "VBA + SQL de consultas + propiedades de controles",
+                        value: "global" as const
+                    },
+                    {
+                        label: "Solo SQL de consultas",
+                        description: "Busca en QueryDefs",
+                        value: "queries" as const
+                    }
+                ],
+                {
+                    title: "Alcance de la busqueda"
+                }
+            );
+
+            if (!scopePick) {
+                return;
+            }
+
+            const regexPick = await vscode.window.showQuickPick(
+                [
+                    { label: "Texto literal", value: false },
+                    { label: "Regex", value: true }
+                ],
+                {
+                    title: "Modo de busqueda"
+                }
+            );
+
+            if (!regexPick) {
+                return;
+            }
+
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Buscando usos...",
+                    cancellable: false
+                },
+                () => scopePick.value === "global"
+                    ? mcpClient.findUsages(connection, searchText.trim(), { useRegex: regexPick.value })
+                    : mcpClient.searchQueries(connection, searchText.trim(), { useRegex: regexPick.value })
+            );
+
+            const vbaMatches = Array.isArray((result as any).vba_matches) ? (result as any).vba_matches : [];
+            const queryMatches = Array.isArray((result as any).query_matches)
+                ? (result as any).query_matches
+                : Array.isArray((result as any).results)
+                    ? (result as any).results
+                    : [];
+            const controlMatches = Array.isArray((result as any).control_matches) ? (result as any).control_matches : [];
+            const totalMatches = typeof (result as any).total_matches === "number"
+                ? Number((result as any).total_matches)
+                : (vbaMatches.length + queryMatches.length + controlMatches.length);
+
+            const doc = await vscode.workspace.openTextDocument({
+                content: [
+                    "# Resultado busqueda de usos",
+                    "",
+                    `- Conexion: ${connection.name}`,
+                    `- Texto: ${searchText.trim()}`,
+                    `- Alcance: ${scopePick.value}`,
+                    `- Regex: ${regexPick.value ? "si" : "no"}`,
+                    `- Total coincidencias: ${totalMatches}`,
+                    "",
+                    `## VBA (${vbaMatches.length})`,
+                    "",
+                    "```json",
+                    JSON.stringify(vbaMatches, null, 2),
+                    "```",
+                    "",
+                    `## Consultas (${queryMatches.length})`,
+                    "",
+                    "```json",
+                    JSON.stringify(queryMatches, null, 2),
+                    "```",
+                    "",
+                    `## Controles (${controlMatches.length})`,
+                    "",
+                    "```json",
+                    JSON.stringify(controlMatches, null, 2),
+                    "```",
+                    "",
+                    "## Payload completo",
+                    "",
+                    "```json",
+                    JSON.stringify(result, null, 2),
+                    "```"
+                ].join("\n"),
+                language: "markdown"
+            });
+
+            await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+            vscode.window.showInformationMessage(`Busqueda completada: ${totalMatches} coincidencia(s).`);
+        })
+    );
                 const picks = await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
@@ -997,21 +1156,17 @@ export function activate(context: vscode.ExtensionContext): void {
             return;
         }
 
-        const results: Array<{ sql: string; payload: unknown }> = [];
-        await vscode.window.withProgress(
+        const results = await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: mode === "create" ? `Creando tabla ${tableName}...` : `Aplicando cambios en ${tableName}...`,
                 cancellable: false
             },
-            async (progress) => {
-                for (let index = 0; index < statements.length; index += 1) {
-                    const sql = statements[index];
-                    progress.report({ message: `${index + 1}/${statements.length}` });
-                    const result = await mcpClient.executeDml(connection, sql);
-                    results.push({ sql, payload: result.payload });
-                }
-            }
+            () => mcpClient.executeBatchSql(
+                connection,
+                statements.map((sql, index) => ({ sql, label: `table_designer_${index + 1}` })),
+                true
+            )
         );
 
         treeProvider.refresh();
@@ -1028,11 +1183,11 @@ export function activate(context: vscode.ExtensionContext): void {
                     `## Sentencia ${index + 1}`,
                     "",
                     "```sql",
-                    entry.sql,
+                    String(entry.sql ?? ""),
                     "```",
                     "",
                     "```json",
-                    JSON.stringify(entry.payload, null, 2),
+                    JSON.stringify(entry, null, 2),
                     "```",
                     ""
                 ]))
@@ -1500,10 +1655,91 @@ render();
         }
     }
 
+    function splitSqlStatements(sql: string): string[] {
+        return sql
+            .split(";")
+            .map((statement) => statement.trim())
+            .filter((statement) => statement.length > 0);
+    }
+
+    function detectFileType(filePath: string): "csv" | "xlsx" | undefined {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === ".csv") {
+            return "csv";
+        }
+        if (ext === ".xlsx") {
+            return "xlsx";
+        }
+        return undefined;
+    }
+
+    function isDestructiveSqlStatement(sql: string): boolean {
+        return /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(sql);
+    }
+
     // Helper to execute SQL and show result as markdown table (SELECT) or DML confirmation
     async function runSqlAndShow(connection: import("./models/types").AccessConnection, sql: string): Promise<void> {
         const trimmed = sql.trim();
-        const isDml = /^\s*(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE)\b/i.test(trimmed);
+        const statements = splitSqlStatements(trimmed);
+
+        if (statements.length > 1) {
+            const hasDestructive = statements.some((statement) => isDestructiveSqlStatement(statement));
+            if (hasDestructive) {
+                const confirmBatch = await vscode.window.showWarningMessage(
+                    rt("sql.confirm.title"),
+                    {
+                        modal: true,
+                        detail: `Se van a ejecutar ${statements.length} sentencias en \"${connection.name}\".`
+                    },
+                    "Ejecutar"
+                );
+                if (confirmBatch !== "Ejecutar") {
+                    return;
+                }
+            }
+
+            const results = await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: rt("sql.executing"), cancellable: false },
+                () => mcpClient.executeBatchSql(
+                    connection,
+                    statements.map((statement, index) => ({
+                        sql: statement,
+                        label: `sql_${index + 1}`
+                    })),
+                    true
+                )
+            );
+
+            const doc = await vscode.workspace.openTextDocument({
+                content: [
+                    "# Resultado SQL Batch",
+                    "",
+                    `- ${rt("sql.result.connection")}: ${connection.name}`,
+                    `- Sentencias: ${results.length}`,
+                    "",
+                    ...results.flatMap((entry, index) => ([
+                        `## Sentencia ${index + 1}`,
+                        "",
+                        "```sql",
+                        String(entry.sql ?? ""),
+                        "```",
+                        "",
+                        "```json",
+                        JSON.stringify(entry, null, 2),
+                        "```",
+                        ""
+                    ]))
+                ].join("\n"),
+                language: "markdown"
+            });
+
+            await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(`Batch SQL ejecutado: ${results.length} sentencia(s).`);
+            return;
+        }
+
+        const isDml = isDestructiveSqlStatement(trimmed);
 
         if (isDml) {
             const verb = trimmed.match(/^\s*(\w+)/i)?.[1]?.toUpperCase() ?? "DML";
@@ -1817,6 +2053,162 @@ render();
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error ejecutando SQL: ${message}`);
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("accessExplorer.transferData", async (node?: any) => {
+            const connection = node?.connection ?? activeSqlConnection ?? await pickConnection("Seleccionar base de datos para importar/exportar datos");
+            if (!connection) {
+                return;
+            }
+
+            const actionPick = await vscode.window.showQuickPick(
+                [
+                    { label: "Importar a Access", description: "CSV/XLSX -> tabla Access", value: "import" as const },
+                    { label: "Exportar desde Access", description: "tabla Access -> CSV/XLSX", value: "export" as const }
+                ],
+                {
+                    title: "Transferencia de datos",
+                    placeHolder: "Selecciona la operacion"
+                }
+            );
+
+            if (!actionPick) {
+                return;
+            }
+
+            const tableName = await pickObjectFromCategory(
+                connection,
+                "table",
+                actionPick.value === "import" ? "Tabla destino en Access" : "Tabla origen en Access"
+            );
+            if (!tableName) {
+                return;
+            }
+
+            let filePath: string | undefined;
+            if (actionPick.value === "import") {
+                const uri = await vscode.window.showOpenDialog({
+                    canSelectFiles: true,
+                    canSelectMany: false,
+                    canSelectFolders: false,
+                    openLabel: "Seleccionar archivo",
+                    filters: {
+                        "Datos": ["csv", "xlsx"]
+                    }
+                });
+                filePath = uri?.[0]?.fsPath;
+            } else {
+                const uri = await vscode.window.showSaveDialog({
+                    saveLabel: "Guardar exportacion",
+                    defaultUri: vscode.Uri.file(`${tableName}.csv`),
+                    filters: {
+                        "CSV": ["csv"],
+                        "Excel": ["xlsx"]
+                    }
+                });
+                filePath = uri?.fsPath;
+            }
+
+            if (!filePath) {
+                return;
+            }
+
+            const detectedType = detectFileType(filePath);
+            const fileType = detectedType
+                ?? (await vscode.window.showQuickPick(
+                    [
+                        { label: "CSV (.csv)", value: "csv" as const },
+                        { label: "Excel (.xlsx)", value: "xlsx" as const }
+                    ],
+                    { title: "Tipo de archivo" }
+                ))?.value;
+
+            if (!fileType) {
+                return;
+            }
+
+            const headerPick = await vscode.window.showQuickPick(
+                [
+                    { label: "Si", description: "La primera fila contiene cabeceras", value: true },
+                    { label: "No", description: "Sin cabeceras en la primera fila", value: false }
+                ],
+                {
+                    title: "Cabeceras",
+                    placeHolder: "Indica si el archivo tiene fila de cabeceras"
+                }
+            );
+
+            if (!headerPick) {
+                return;
+            }
+
+            let range: string | undefined;
+            let specName: string | undefined;
+
+            if (fileType === "xlsx") {
+                range = await vscode.window.showInputBox({
+                    title: "Rango de Excel (opcional)",
+                    prompt: "Ejemplo: Hoja1!A1:D200",
+                    placeHolder: "Dejalo vacio para usar el rango por defecto"
+                });
+                range = range?.trim() || undefined;
+            } else {
+                specName = await vscode.window.showInputBox({
+                    title: "Nombre de especificacion CSV (opcional)",
+                    prompt: "Nombre de especificacion guardada en Access",
+                    placeHolder: "Dejalo vacio para usar configuracion por defecto"
+                });
+                specName = specName?.trim() || undefined;
+            }
+
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: actionPick.value === "import"
+                        ? `Importando datos en ${tableName}...`
+                        : `Exportando datos de ${tableName}...`,
+                    cancellable: false
+                },
+                () => mcpClient.transferData(connection, {
+                    action: actionPick.value,
+                    filePath,
+                    tableName,
+                    fileType,
+                    hasHeaders: headerPick.value,
+                    range,
+                    specName
+                })
+            );
+
+            const doc = await vscode.workspace.openTextDocument({
+                content: [
+                    "# Resultado transferencia de datos",
+                    "",
+                    `- Conexion: ${connection.name}`,
+                    `- Operacion: ${actionPick.value}`,
+                    `- Tabla: ${tableName}`,
+                    `- Archivo: ${filePath}`,
+                    `- Tipo: ${fileType}`,
+                    `- Cabeceras: ${headerPick.value ? "si" : "no"}`,
+                    range ? `- Rango: ${range}` : "",
+                    specName ? `- Especificacion CSV: ${specName}` : "",
+                    "",
+                    "```json",
+                    JSON.stringify(result, null, 2),
+                    "```"
+                ].filter((line) => line !== "").join("\n"),
+                language: "markdown"
+            });
+
+            await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+            treeProvider.refresh();
+            vscode.window.showInformationMessage(
+                actionPick.value === "import"
+                    ? `Importacion completada en tabla ${tableName}.`
+                    : `Exportacion completada desde tabla ${tableName}.`
+            );
         })
     );
 

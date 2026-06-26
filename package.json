@@ -34,8 +34,10 @@
         "onCommand:accessExplorer.restartAccessProcesses",
         "onCommand:accessExplorer.registerMcpServer",
         "onCommand:accessExplorer.searchObjects",
+        "onCommand:accessExplorer.findUsages",
         "onCommand:accessExplorer.showDetails",
         "onCommand:accessExplorer.runSqlQuery",
+        "onCommand:accessExplorer.transferData",
         "onCommand:accessExplorer.executeActiveSql",
         "onCommand:accessExplorer.openSqlEditor",
         "onCommand:accessExplorer.pickSqlConnection",
@@ -130,6 +132,11 @@
                 "icon": "$(search)"
             },
             {
+                "command": "accessExplorer.findUsages",
+                "title": "%command.findUsages.title%",
+                "icon": "$(search-fuzzy)"
+            },
+            {
                 "command": "accessExplorer.showDetails",
                 "title": "%command.showDetails.title%"
             },
@@ -137,6 +144,11 @@
                 "command": "accessExplorer.runSqlQuery",
                 "title": "%command.runSqlQuery.title%",
                 "icon": "$(play)"
+            },
+            {
+                "command": "accessExplorer.transferData",
+                "title": "%command.transferData.title%",
+                "icon": "$(arrow-swap)"
             },
             {
                 "command": "accessExplorer.executeActiveSql",
@@ -292,54 +304,64 @@
                     "group": "navigation@4"
                 },
                 {
-                    "command": "accessExplorer.showMcpRuntime",
+                    "command": "accessExplorer.findUsages",
                     "when": "view == accessExplorerView",
                     "group": "navigation@5"
                 },
                 {
-                    "command": "accessExplorer.runSqlQuery",
+                    "command": "accessExplorer.showMcpRuntime",
                     "when": "view == accessExplorerView",
                     "group": "navigation@6"
                 },
                 {
-                    "command": "accessExplorer.openSqlEditor",
+                    "command": "accessExplorer.runSqlQuery",
                     "when": "view == accessExplorerView",
                     "group": "navigation@7"
                 },
                 {
-                    "command": "accessExplorer.newQuery",
+                    "command": "accessExplorer.transferData",
                     "when": "view == accessExplorerView",
                     "group": "navigation@8"
                 },
                 {
-                    "command": "accessExplorer.createTableDesigner",
+                    "command": "accessExplorer.openSqlEditor",
                     "when": "view == accessExplorerView",
                     "group": "navigation@9"
                 },
                 {
-                    "command": "accessExplorer.createTableDdl",
+                    "command": "accessExplorer.newQuery",
                     "when": "view == accessExplorerView",
                     "group": "navigation@10"
                 },
                 {
-                    "command": "accessExplorer.createModule",
+                    "command": "accessExplorer.createTableDesigner",
                     "when": "view == accessExplorerView",
                     "group": "navigation@11"
                 },
                 {
-                    "command": "accessExplorer.openVbaConsole",
+                    "command": "accessExplorer.createTableDdl",
                     "when": "view == accessExplorerView",
                     "group": "navigation@12"
                 },
                 {
-                    "command": "accessExplorer.createDatabase",
+                    "command": "accessExplorer.createModule",
                     "when": "view == accessExplorerView",
                     "group": "navigation@13"
                 },
                 {
-                    "command": "accessExplorer.secondBrain.full",
+                    "command": "accessExplorer.openVbaConsole",
                     "when": "view == accessExplorerView",
                     "group": "navigation@14"
+                },
+                {
+                    "command": "accessExplorer.createDatabase",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@15"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView",
+                    "group": "navigation@16"
                 }
             ],
             "editor/title": [
@@ -410,24 +432,34 @@
                     "group": "1_actions@3"
                 },
                 {
-                    "command": "accessExplorer.createModule",
+                    "command": "accessExplorer.findUsages",
                     "when": "view == accessExplorerView && viewItem == accessConnection",
                     "group": "1_actions@4"
                 },
                 {
-                    "command": "accessExplorer.openVbaConsole",
+                    "command": "accessExplorer.transferData",
                     "when": "view == accessExplorerView && viewItem == accessConnection",
                     "group": "1_actions@5"
                 },
                 {
-                    "command": "accessExplorer.closeAccess",
+                    "command": "accessExplorer.createModule",
                     "when": "view == accessExplorerView && viewItem == accessConnection",
                     "group": "1_actions@6"
                 },
                 {
-                    "command": "accessExplorer.secondBrain.full",
+                    "command": "accessExplorer.openVbaConsole",
                     "when": "view == accessExplorerView && viewItem == accessConnection",
                     "group": "1_actions@7"
+                },
+                {
+                    "command": "accessExplorer.closeAccess",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@8"
+                },
+                {
+                    "command": "accessExplorer.secondBrain.full",
+                    "when": "view == accessExplorerView && viewItem == accessConnection",
+                    "group": "1_actions@9"
                 },
                 {
                     "command": "accessExplorer.createTableDesigner",

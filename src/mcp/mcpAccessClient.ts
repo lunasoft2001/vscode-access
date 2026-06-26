@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { clearTimeout, setTimeout } from "node:timers";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as https from "node:https";
 import { spawn } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -77,6 +78,14 @@ interface McpVersionInfo {
     version: string;
     commit: string;
     originUrl: string;
+}
+
+export interface McpUpdateCheckInfo {
+    updateAvailable: boolean;
+    installedVersion: string;
+    installedCommit: string;
+    latestVersion: string;
+    latestCommit: string;
 }
 
 export interface McpRuntimeInfo {
@@ -289,6 +298,76 @@ export class McpAccessClient {
         }
     }
 
+    async checkManagedMcpUpdate(): Promise<McpUpdateCheckInfo | undefined> {
+        const baseDir = this.getManagedRuntimeBaseDir();
+        const repoDir = path.join(baseDir, "MCP-Access");
+
+        if (!fs.existsSync(repoDir)) {
+            return undefined;
+        }
+
+        const installed = await this.getManagedMcpVersionInfo(repoDir);
+        const remoteMain = await this.fetchRemoteMainCommitInfo();
+        const remoteTag = await this.fetchLatestRemoteTagInfo();
+        const remote = remoteTag ?? remoteMain;
+        const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
+
+        let installedCommit = installed.commit;
+        let updateAvailable = false;
+
+        const installedVersionToken = this.tryExtractVersionToken(installed.version);
+        const remoteVersionToken = this.tryExtractVersionToken(remote.version);
+
+        if (installedVersionToken && remoteVersionToken) {
+            updateAvailable = installedVersionToken !== remoteVersionToken;
+        }
+
+        if (hasGitMetadata && !updateAvailable) {
+            const fullHeadResult = await this.runCommand("git", ["-C", repoDir, "rev-parse", "HEAD"], undefined, true);
+            if (fullHeadResult.exitCode === 0) {
+                installedCommit = (fullHeadResult.stdout || "").trim() || installed.commit;
+                updateAvailable = installedCommit !== remoteMain.sha;
+            }
+        }
+
+        return {
+            updateAvailable,
+            installedVersion: installed.version,
+            installedCommit,
+            latestVersion: remote.version,
+            latestCommit: remote.sha
+        };
+    }
+
+    async updateManagedMcpRuntime(): Promise<McpRuntimeInfo> {
+        const baseDir = this.getManagedRuntimeBaseDir();
+        const repoDir = path.join(baseDir, "MCP-Access");
+
+        if (!fs.existsSync(repoDir)) {
+            throw new Error("El runtime MCP no está instalado todavía.");
+        }
+
+        const gitAvailable = await this.commandAvailable("git", ["--version"]);
+        const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
+
+        if (gitAvailable && hasGitMetadata) {
+            const fetch = await this.runCommand("git", ["-C", repoDir, "fetch", "origin", "main"], undefined, true);
+            if (fetch.exitCode !== 0) {
+                throw new Error(`No se pudo descargar origin/main para MCP-Access. ${fetch.stderr || fetch.stdout}`);
+            }
+
+            const pull = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
+            if (pull.exitCode !== 0) {
+                throw new Error(`No se pudo actualizar MCP-Access con git pull. ${pull.stderr || pull.stdout}`);
+            }
+        } else {
+            await this.downloadMcpAccessZipWithBackup(baseDir, repoDir);
+            await this.normalizeManagedRuntimeLayout(baseDir, repoDir);
+        }
+
+        return this.getMcpRuntimeInfo();
+    }
+
     private tryExtractMcpVersionFromFiles(repoDir: string): string | undefined {
         const candidateFiles = [
             path.join(repoDir, "README.md"),
@@ -318,6 +397,101 @@ export class McpAccessClient {
         }
 
         return undefined;
+    }
+
+    private tryExtractVersionToken(value: string): string | undefined {
+        const versionMatch = value.match(/\bv\d+\.\d+\.\d+\b/i);
+        return versionMatch?.[0];
+    }
+
+    private async fetchRemoteMainCommitInfo(): Promise<{ sha: string; version: string }> {
+        const apiUrl = "https://api.github.com/repos/unmateria/MCP-Access/commits/main";
+
+        const payload = await new Promise<string>((resolve, reject) => {
+            const request = https.get(
+                apiUrl,
+                {
+                    headers: {
+                        "User-Agent": "Access-Explorer",
+                        "Accept": "application/vnd.github+json"
+                    }
+                },
+                (response) => {
+                    const chunks: Buffer[] = [];
+                    response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                    response.on("end", () => {
+                        if ((response.statusCode ?? 500) >= 400) {
+                            reject(new Error(`GitHub API devolvió ${response.statusCode ?? 500}`));
+                            return;
+                        }
+                        resolve(Buffer.concat(chunks).toString("utf8"));
+                    });
+                }
+            );
+
+            request.on("error", reject);
+        });
+
+        const parsed = JSON.parse(payload) as {
+            sha?: string;
+            commit?: {
+                message?: string;
+            };
+        };
+
+        const sha = parsed.sha?.trim();
+        if (!sha) {
+            throw new Error("No se pudo determinar el commit remoto de MCP-Access.");
+        }
+
+        const message = parsed.commit?.message ?? "";
+        const version = this.tryExtractVersionToken(message) || `commit ${sha.slice(0, 7)}`;
+
+        return { sha, version };
+    }
+
+    private async fetchLatestRemoteTagInfo(): Promise<{ sha: string; version: string } | undefined> {
+        const apiUrl = "https://api.github.com/repos/unmateria/MCP-Access/tags?per_page=1";
+
+        const payload = await new Promise<string>((resolve, reject) => {
+            const request = https.get(
+                apiUrl,
+                {
+                    headers: {
+                        "User-Agent": "Access-Explorer",
+                        "Accept": "application/vnd.github+json"
+                    }
+                },
+                (response) => {
+                    const chunks: Buffer[] = [];
+                    response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                    response.on("end", () => {
+                        if ((response.statusCode ?? 500) >= 400) {
+                            reject(new Error(`GitHub API devolvió ${response.statusCode ?? 500}`));
+                            return;
+                        }
+                        resolve(Buffer.concat(chunks).toString("utf8"));
+                    });
+                }
+            );
+
+            request.on("error", reject);
+        });
+
+        const parsed = JSON.parse(payload) as Array<{
+            name?: string;
+            commit?: { sha?: string };
+        }>;
+
+        const first = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : undefined;
+        const version = first?.name?.trim();
+        const sha = first?.commit?.sha?.trim();
+
+        if (!version || !sha) {
+            return undefined;
+        }
+
+        return { version, sha };
     }
 
     async disconnect(): Promise<void> {
@@ -610,6 +784,42 @@ export class McpAccessClient {
         return this.extractSql(payload);
     }
 
+    async searchQueries(
+        connection: AccessConnection,
+        searchText: string,
+        options?: { matchCase?: boolean; useRegex?: boolean; maxResults?: number }
+    ): Promise<Record<string, unknown>> {
+        const payload = await this.callTool("search_queries", {
+            db_path: connection.dbPath,
+            search_text: searchText,
+            match_case: options?.matchCase ?? false,
+            use_regex: options?.useRegex ?? false,
+            max_results: options?.maxResults ?? 100
+        }, this.getSqlTimeout());
+
+        return payload && typeof payload === "object"
+            ? payload as Record<string, unknown>
+            : { result: payload };
+    }
+
+    async findUsages(
+        connection: AccessConnection,
+        searchText: string,
+        options?: { matchCase?: boolean; useRegex?: boolean; maxResults?: number }
+    ): Promise<Record<string, unknown>> {
+        const payload = await this.callTool("find_usages", {
+            db_path: connection.dbPath,
+            search_text: searchText,
+            match_case: options?.matchCase ?? false,
+            use_regex: options?.useRegex ?? false,
+            max_results: options?.maxResults ?? 200
+        }, this.getSqlTimeout());
+
+        return payload && typeof payload === "object"
+            ? payload as Record<string, unknown>
+            : { result: payload };
+    }
+
     private getSqlTimeout(): number {
         return this.getConfig().get<number>("mcp.sqlQueryTimeoutMs", 600000);
     }
@@ -651,6 +861,85 @@ export class McpAccessClient {
             rows: this.extractRows(payload),
             payload
         };
+    }
+
+    async executeBatchSql(
+        connection: AccessConnection,
+        statements: Array<{ sql: string; label?: string }>,
+        stopOnError = true
+    ): Promise<Array<Record<string, unknown>>> {
+        const normalized = statements
+            .map((statement) => ({
+                sql: statement.sql.trim(),
+                label: statement.label
+            }))
+            .filter((statement) => statement.sql.length > 0);
+
+        if (normalized.length === 0) {
+            return [];
+        }
+
+        const confirmDestructive = normalized.some((statement) => this.isDestructiveSql(statement.sql));
+        const payload = await this.callTool(
+            "execute_batch",
+            {
+                db_path: connection.dbPath,
+                statements: normalized,
+                stop_on_error: stopOnError,
+                confirm_destructive: confirmDestructive
+            },
+            this.getSqlTimeout()
+        );
+
+        const results = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload?.results)
+                ? payload.results
+                : [];
+
+        return results.map((item: any, index: number) => {
+            const rows = this.extractRows(item);
+            const rowCount = this.extractRowCount(item);
+            const rowsAffected = this.extractRowsAffected(item);
+
+            return {
+                sql: String(item?.sql ?? normalized[index]?.sql ?? ""),
+                label: item?.label ? String(item.label) : normalized[index]?.label,
+                rowCount,
+                rowsAffected,
+                rows,
+                error: item?.error ? String(item.error) : undefined,
+                ...((item && typeof item === "object") ? item : {})
+            };
+        });
+    }
+
+    async transferData(
+        connection: AccessConnection,
+        params: {
+            action: "import" | "export";
+            filePath: string;
+            tableName: string;
+            fileType: "xlsx" | "csv";
+            hasHeaders?: boolean;
+            range?: string;
+            specName?: string;
+        }
+    ): Promise<Record<string, unknown>> {
+        const payload = await this.callTool("transfer_data", {
+            db_path: connection.dbPath,
+            action: params.action,
+            file_path: params.filePath,
+            table_name: params.tableName,
+            file_type: params.fileType,
+            has_headers: params.hasHeaders ?? true,
+            range: params.range,
+            spec_name: params.specName
+        }, this.getSqlTimeout());
+
+        return payload && typeof payload === "object"
+            ? payload as Record<string, unknown>
+            : { result: payload };
     }
 
     async executeDml(
@@ -2566,6 +2855,10 @@ export class McpAccessClient {
             return parseInt(match[1], 10);
         }
         return undefined;
+    }
+
+    private isDestructiveSql(sql: string): boolean {
+        return /^\s*(DELETE|DROP|TRUNCATE|ALTER)\b/i.test(sql);
     }
 }
 
