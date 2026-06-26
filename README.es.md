@@ -7,17 +7,28 @@
 
 ---
 
-## Características
+Access Explorer está pensado para mantener proyectos reales de Access con la experiencia de edición de VS Code, sin perder compatibilidad con Access.
 
-- Conexiones múltiples a bases `.accdb` / `.mdb`
-- Árbol de objetos por conexión: Tablas, Consultas, Formularios, Informes, Macros, Módulos VBA, Relaciones, Referencias
-- Editor SQL integrado con resultados en rejilla (ordenar, filtrar, copiar, exportar CSV)
-- Soporte CRUD: INSERT / UPDATE / DELETE con confirmación
-- Editar y guardar código VBA directamente en Access
-- Editar propiedades de controles de formularios/informes
-- Compilar VBA y mostrar errores en el editor
-- Compactar y reparar la base de datos
-- Interfaz en **inglés**, **alemán** y **español** (según el idioma de VS Code)
+## Qué Puedes Hacer
+
+- **Explorar rápido**: conecta múltiples `.accdb` / `.mdb` y navega un árbol completo (Tablas, Consultas, Formularios, Informes, Macros, Módulos VBA, Relaciones, Referencias).
+- **Trabajar SQL con seguridad**: ejecuta SQL suelto o lotes de varias sentencias, con confirmación para operaciones destructivas.
+- **Mover datos**: importa y exporta datos de tablas en CSV/XLSX desde la propia extensión.
+- **Mantener VBA cómodamente**: abre, edita y guarda código VBA desde VS Code; compila y revisa errores.
+- **Refactorizar con contexto**: busca usos en VBA, SQL de consultas guardadas y propiedades de controles.
+- **Mantener la base sana**: ejecuta Compactar/Reparar y consulta estado/versión del runtime MCP.
+- **Trabajar en tu idioma**: interfaz en **inglés**, **alemán** y **español** (respeta el idioma de VS Code).
+
+---
+
+## En 30 Segundos
+
+1. Abre la vista **Access** en la barra lateral.
+2. Ejecuta **Access: Add Connection** y selecciona una base `.accdb`.
+3. Expande objetos y abre una consulta o módulo.
+4. Para SQL: usa **Access: SQL temporal** o **Access: Ejecutar consulta SQL**.
+5. Para VBA: edita y pulsa **Access: Guardar código en Access**, luego **Access: Compilar módulo**.
+6. Para intercambio de datos: ejecuta **Access: Importar/Exportar datos**.
 
 ---
 
@@ -118,14 +129,45 @@ Una vez instalada, los siguientes ajustes están disponibles en **Ajustes** de V
 
 ---
 
-## Uso rápido
+## Flujos de Trabajo Comunes
 
-1. Abre la vista **Access** en la barra lateral (icono de luna).
-2. Pulsa **Access: Add Connection** y selecciona una base `.accdb`.
-3. Expande las categorías para explorar los objetos.
-4. Clic derecho en una conexión para **Compilar VBA** o **Compactar y reparar**.
-5. Abre un módulo VBA → edita → guarda con **Access: Save Code to Access** (icono de subida en la barra del editor).
-6. Abre el editor SQL (**Access: New SQL Query**), escribe tu consulta y ejecútala con el botón ▶.
+### 1) Mantenimiento y diagnóstico SQL
+
+1. Abre **Access: SQL temporal**.
+2. Ejecuta una sentencia o varias en lote.
+3. Revisa la rejilla de resultados o el informe de batch.
+
+### 2) Ciclo editar-compilar de VBA
+
+1. Abre un módulo/formulario/informe desde el árbol.
+2. Edita en VS Code.
+3. Guarda con **Access: Guardar código en Access**.
+4. Compila con **Access: Compilar módulo** o **Access: Compilar VBA**.
+
+### 3) Migración de datos con CSV/XLSX
+
+1. Ejecuta **Access: Importar/Exportar datos**.
+2. Elige Importar o Exportar.
+3. Selecciona tabla, archivo y opciones (cabeceras, rango/spec según aplique).
+4. Revisa el informe generado.
+
+---
+
+## Comandos Clave
+
+| Comando | Para qué sirve |
+|---------|-----------------|
+| `Access: Add Connection` | Conectar una nueva base de Access |
+| `Access: Buscar objetos` | Buscar y abrir objetos rápidamente |
+| `Access: Buscar usos` | Buscar texto en VBA, consultas y propiedades de controles |
+| `Access: SQL temporal` | Abrir un editor SQL de trabajo |
+| `Access: Ejecutar consulta SQL` | Lanzar SQL directamente |
+| `Access: Ejecutar SQL activo` | Ejecutar selección SQL (o documento completo) |
+| `Access: Importar/Exportar datos` | Transferir datos de tablas vía CSV/XLSX |
+| `Access: Guardar código en Access` | Subir cambios de código VBA/form/report a Access |
+| `Access: Compilar módulo` / `Access: Compilar VBA` | Validar VBA y mostrar errores |
+| `Access: Compactar y reparar` | Mantenimiento y limpieza del archivo |
+| `Access: Mostrar runtime MCP` | Ver ruta/versión/origen del runtime y estado de actualización |
 
 ---
 

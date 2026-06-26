@@ -7,17 +7,28 @@
 
 ---
 
-## Features
+Access Explorer is built for people who maintain real Access projects and want modern editor ergonomics in VS Code without losing Access compatibility.
 
-- Multiple connections to `.accdb` / `.mdb` databases
-- Object tree per connection: Tables, Queries, Forms, Reports, Macros, VBA Modules, Relationships, References
-- Integrated SQL editor with results grid (sort, filter, copy, export CSV)
-- CRUD support: INSERT / UPDATE / DELETE with confirmation dialog
-- Edit and save VBA code directly into Access
-- Edit form/report control properties
-- Compile VBA and display errors in the editor
-- Compact & Repair database
-- UI available in **English**, **German** and **Spanish** (follows VS Code display language)
+## What You Can Do
+
+- **Explore fast**: connect multiple `.accdb` / `.mdb` files and browse a structured object tree (Tables, Queries, Forms, Reports, Macros, VBA Modules, Relationships, References).
+- **Work with SQL safely**: run ad-hoc SQL, execute multi-statement batches, and get confirmation prompts for destructive operations.
+- **Move data in/out**: import or export table data using CSV/XLSX directly from the extension.
+- **Maintain VBA comfortably**: open, edit, and save VBA code from VS Code, then compile and inspect compile errors.
+- **Refactor with visibility**: find usages across VBA, saved query SQL, and control properties in forms/reports.
+- **Keep databases healthy**: run Compact & Repair and inspect MCP runtime status/update info.
+- **Use your language**: UI available in **English**, **German**, and **Spanish** (follows VS Code display language).
+
+---
+
+## In 30 Seconds
+
+1. Open the **Access** view in the Activity Bar.
+2. Run **Access: Add Connection** and pick an `.accdb` file.
+3. Expand objects and open a query/module.
+4. For SQL: use **Access: Temporary SQL** or **Access: Run SQL Query**.
+5. For VBA: edit and click **Access: Save Code to Access**, then **Access: Compile Module**.
+6. For data exchange: run **Access: Import/Export Data**.
 
 ---
 
@@ -118,14 +129,45 @@ After installing the extension, these settings are available in VS Code **Settin
 
 ---
 
-## Quick Start
+## Common Workflows
 
-1. Open the **Access** view in the activity bar (moon icon).
-2. Click **Access: Add Connection** and select an `.accdb` file.
-3. Expand categories to explore database objects.
-4. Right-click a connection to **Compile VBA** or **Compact & Repair**.
-5. Open a VBA module → edit → save with **Access: Save Code to Access** (upload icon in editor toolbar).
-6. Open the SQL editor (**Access: New SQL Query**), write your query and run it with the ▶ button.
+### 1) SQL maintenance and diagnostics
+
+1. Open **Access: Temporary SQL**.
+2. Run single SQL or multi-statement scripts.
+3. Review results grid or batch execution report.
+
+### 2) VBA fix-and-compile loop
+
+1. Open a module/form/report code object from the tree.
+2. Edit in VS Code.
+3. Save with **Access: Save Code to Access**.
+4. Compile with **Access: Compile Module** or **Access: Compile VBA**.
+
+### 3) Data migration with CSV/XLSX
+
+1. Run **Access: Import/Export Data**.
+2. Choose Import or Export.
+3. Pick table, file, and options (headers, range/spec when applicable).
+4. Review the generated operation report.
+
+---
+
+## Command Cheat Sheet
+
+| Command | What it is for |
+|---------|-----------------|
+| `Access: Add Connection` | Connect a new Access database |
+| `Access: Search Objects` | Quickly find and open DB objects |
+| `Access: Find Usages` | Cross-search text in VBA, queries, and control properties |
+| `Access: Temporary SQL` | Open a scratch SQL editor |
+| `Access: Run SQL Query` | Execute SQL immediately |
+| `Access: Execute Active SQL` | Run selected SQL (or full SQL document) |
+| `Access: Import/Export Data` | Transfer table data via CSV/XLSX |
+| `Access: Save Code to Access` | Push edited VBA/form/report code back to Access |
+| `Access: Compile Module` / `Access: Compile VBA` | Validate VBA and surface errors |
+| `Access: Compact & Repair` | Maintenance and file cleanup |
+| `Access: Show MCP Runtime` | Inspect runtime path/version/source and update state |
 
 ---
 
