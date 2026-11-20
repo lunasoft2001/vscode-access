@@ -2,6 +2,8 @@
 src/**
 .gitignore
 tsconfig.json
+tsconfig.test.json
+.test-build/**
 **/*.map
 **/*.ts
 !dist/**

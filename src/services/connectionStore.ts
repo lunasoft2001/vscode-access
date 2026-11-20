@@ -53,6 +53,6 @@ export class ConnectionStore {
     }
 }
 
-function normalizeDbPath(dbPath: string): string {
+export function normalizeDbPath(dbPath: string): string {
     return dbPath.trim().replace(/\//g, "\\").toLowerCase();
 }
