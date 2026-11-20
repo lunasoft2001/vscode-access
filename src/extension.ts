@@ -5,7 +5,9 @@ import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
 import { McpAccessClient } from "./mcp/mcpAccessClient";
 import { ACCESS_CATEGORIES } from "./models/types";
 import { AccessTreeProvider } from "./providers/accessTreeProvider";
-import { ConnectionStore } from "./services/connectionStore";
+import { ConnectionStore, normalizeDbPath } from "./services/connectionStore";
+import { AccessMetadataService } from "./services/accessMetadataService";
+import { registerAccessCompletionProviders } from "./providers/accessCompletionProvider";
 import { SecondBrainService } from "./services/secondBrainService";
 import { BulkExportService } from "./services/bulkExportService";
 import { ExportObjectsService } from "./services/exportObjectsService";
@@ -61,6 +63,35 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(mcpClient);
+
+    // Database-aware completion (VBA "Forms!" / SQL "alias."): read-only, cached metadata, Access documents only.
+    const intellisenseOutput = vscode.window.createOutputChannel("Access Explorer IntelliSense");
+    const metadataService = new AccessMetadataService(mcpClient, {
+        // Never let a background completion switch the database the MCP session is working on.
+        canLoad: (connection) => {
+            const lastUsed = mcpClient.getLastUsedDbPath();
+            return lastUsed !== undefined && normalizeDbPath(lastUsed) === normalizeDbPath(connection.dbPath);
+        },
+        onLoadBlocked: (connection) => {
+            vscode.window.setStatusBarMessage(rt("intellisense.paused", connection.name), 6000);
+        },
+        onDiagnostic: (message) => intellisenseOutput.appendLine(message)
+    });
+    const resolveBoundConnection = (
+        meta: { connection: import("./models/types").AccessConnection } | undefined
+    ): import("./models/types").AccessConnection | undefined =>
+        meta ? connectionStore.getAll().find((connection) => connection.id === meta.connection.id) : undefined;
+    context.subscriptions.push(
+        intellisenseOutput,
+        registerAccessCompletionProviders({
+            metadata: metadataService,
+            resolveVbaConnection: (document) => resolveBoundConnection(codeDocuments.get(document.uri.toString())),
+            resolveSqlConnection: (document) => resolveBoundConnection(queryDocuments.get(document.uri.toString()))
+        }),
+        // Any tree refresh (manual, reconnect, database switch, edit through Explorer) or MCP disconnect drops the snapshot.
+        treeProvider.onDidChangeTreeData(() => metadataService.invalidateAll()),
+        mcpClient.onDidDisconnect(() => metadataService.invalidateAll())
+    );
 
     // Status bar item: shows the active connection for the SQL editor
     let activeSqlConnection: import("./models/types").AccessConnection | undefined;
@@ -1828,6 +1859,9 @@ render();
             if (!activeSqlConnection) {
                 activeSqlConnection = await pickConnection(rt("sql.openEditor.pickConnection"));
                 updateSqlStatusBar();
+            }
+            if (activeSqlConnection) {
+                trackQueryDocument(doc, { connection: activeSqlConnection, isNew: true });
             }
         })
     );

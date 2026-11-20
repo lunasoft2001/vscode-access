@@ -114,6 +114,11 @@ export class McpAccessClient {
     private prerequisiteState: PrerequisiteState | undefined;
     private trustBootstrapAttempted = false;
     private trustedLocationsSnapshotJson: string | undefined;
+    private lastUsedDbPath: string | undefined;
+    private readonly disconnectEmitter = new vscode.EventEmitter<void>();
+
+    /** Fires whenever the MCP session is torn down (disconnect, reconnect, restart). */
+    readonly onDidDisconnect = this.disconnectEmitter.event;
 
     constructor(
         private readonly getConfig: () => vscode.WorkspaceConfiguration,
@@ -124,7 +129,13 @@ export class McpAccessClient {
 
     dispose(): void {
         void this.disconnect();
+        this.disconnectEmitter.dispose();
         this.output.dispose();
+    }
+
+    /** Database the MCP session was last asked to work on; undefined before the first call or after a disconnect. */
+    getLastUsedDbPath(): string | undefined {
+        return this.lastUsedDbPath;
     }
 
     async reconnect(): Promise<void> {
@@ -504,6 +515,8 @@ export class McpAccessClient {
         }
         this.client = undefined;
         this.transport = undefined;
+        this.lastUsedDbPath = undefined;
+        this.disconnectEmitter.fire();
 
         const preserveTrustedLocations = this.getConfig().get<boolean>("mcp.preserveTrustedLocations", true);
         if (preserveTrustedLocations) {
@@ -2542,6 +2555,9 @@ export class McpAccessClient {
         const name = toolPrefix ? `${toolPrefix}_${toolSuffix}` : toolSuffix;
 
         this.output.appendLine(`MCP call: ${name}`);
+        if (typeof args.db_path === "string") {
+            this.lastUsedDbPath = args.db_path;
+        }
 
         const call = this.client.callTool({ name, arguments: args });
         const result = await withTimeout(call, timeoutMs);
