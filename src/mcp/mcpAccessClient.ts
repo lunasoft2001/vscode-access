@@ -19,6 +19,8 @@ import {
     AccessTableFieldInfo
 } from "../models/types";
 import { rt } from "../utils/runtimeL10n";
+import { BackgroundMetadataBlockedError } from "../services/accessMetadataService";
+import { normalizeDbPath } from "../services/connectionStore";
 
 class MissingServerScriptError extends Error {}
 
@@ -82,6 +84,17 @@ interface McpVersionInfo {
     version: string;
     commit: string;
     originUrl: string;
+}
+
+interface MetadataRequestOptions {
+    onlyIfCurrentDatabase?: boolean;
+    isAllowed?: () => boolean;
+}
+
+export class SqlDocumentDispatchBlockedError extends Error {
+    constructor() {
+        super("SQL document connection changed before dispatch.");
+    }
 }
 
 export interface McpUpdateCheckInfo {
@@ -529,12 +542,13 @@ export class McpAccessClient {
     async listObjects(
         connection: AccessConnection,
         objectType: string,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<AccessObjectInfo[]> {
         const payload = await this.callTool("list_objects", {
             db_path: connection.dbPath,
             object_type: objectType
-        }, timeoutOverrideMs);
+        }, timeoutOverrideMs, options);
 
         const raw = this.extractObjectArray(payload, objectType);
 
@@ -727,11 +741,11 @@ export class McpAccessClient {
         };
     }
 
-    async getTableFields(connection: AccessConnection, tableName: string): Promise<AccessTableFieldInfo[]> {
+    async getTableFields(connection: AccessConnection, tableName: string, options?: MetadataRequestOptions): Promise<AccessTableFieldInfo[]> {
         const payload = await this.callTool("table_info", {
             db_path: connection.dbPath,
             table_name: tableName
-        });
+        }, undefined, options);
 
         const fields = Array.isArray(payload?.fields) ? payload.fields : [];
         return fields.map((field: any) => ({
@@ -859,13 +873,14 @@ export class McpAccessClient {
     async executeRawSqlQuery(
         connection: AccessConnection,
         sql: string,
-        limit = 500
+        limit = 500,
+        isAllowed?: () => boolean
     ): Promise<AccessQueryPreview> {
         const payload = await this.callTool("execute_sql", {
             db_path: connection.dbPath,
             sql,
             limit
-        }, this.getSqlTimeout());
+        }, this.getSqlTimeout(), { isAllowed });
 
         return {
             sql,
@@ -878,7 +893,8 @@ export class McpAccessClient {
     async executeBatchSql(
         connection: AccessConnection,
         statements: Array<{ sql: string; label?: string }>,
-        stopOnError = true
+        stopOnError = true,
+        isAllowed?: () => boolean
     ): Promise<Array<Record<string, unknown>>> {
         const normalized = statements
             .map((statement) => ({
@@ -900,7 +916,8 @@ export class McpAccessClient {
                 stop_on_error: stopOnError,
                 confirm_destructive: confirmDestructive
             },
-            this.getSqlTimeout()
+            this.getSqlTimeout(),
+            { isAllowed }
         );
 
         const results = Array.isArray(payload)
@@ -956,14 +973,15 @@ export class McpAccessClient {
 
     async executeDml(
         connection: AccessConnection,
-        sql: string
+        sql: string,
+        isAllowed?: () => boolean
     ): Promise<AccessQueryPreview> {
-        await this.suppressAccessAlerts(connection);
+        await this.suppressAccessAlerts(connection, isAllowed);
         try {
             const payload = await this.callTool("execute_sql", {
                 db_path: connection.dbPath,
                 sql
-            }, this.getSqlTimeout());
+            }, this.getSqlTimeout(), { isAllowed });
 
             // El servidor MCP puede devolver rows_affected o similar
             const affected = this.extractRowsAffected(payload);
@@ -1022,13 +1040,14 @@ export class McpAccessClient {
         connection: AccessConnection,
         objectType: "form" | "report",
         objectName: string,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<AccessControlInfo[]> {
         const payload = await this.callTool("list_controls", {
             db_path: connection.dbPath,
             object_type: objectType,
             object_name: objectName
-        }, timeoutOverrideMs);
+        }, timeoutOverrideMs, options);
 
         const controls = Array.isArray(payload?.controls) ? payload.controls : [];
         return controls.map((ctrl: any) => ({
@@ -1173,13 +1192,16 @@ export class McpAccessClient {
      * Silencia los diálogos modales de Access (MsgBox, confirmaciones) para que
      * no bloqueen el servidor MCP. Se ignoran errores porque Access puede no estar abierto.
      */
-    private async suppressAccessAlerts(connection: AccessConnection): Promise<void> {
+    private async suppressAccessAlerts(connection: AccessConnection, isAllowed?: () => boolean): Promise<void> {
         try {
             await this.callTool("eval_vba", {
                 db_path: connection.dbPath,
                 expression: "Application.DisplayAlerts = False\nDoCmd.SetWarnings False"
-            }, 5000);
-        } catch {
+            }, 5000, { isAllowed });
+        } catch (error) {
+            if (error instanceof SqlDocumentDispatchBlockedError) {
+                throw error;
+            }
             // Non-fatal: Access may not be running interactively
         }
     }
@@ -1250,12 +1272,13 @@ export class McpAccessClient {
     async evalVba(
         connection: AccessConnection,
         expression: string,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        isAllowed?: () => boolean
     ): Promise<unknown> {
         return await this.callTool("eval_vba", {
             db_path: connection.dbPath,
             expression
-        }, timeoutOverrideMs);
+        }, timeoutOverrideMs, { isAllowed });
     }
 
     async runVba(
@@ -2527,7 +2550,8 @@ export class McpAccessClient {
     private async callTool(
         toolSuffix: string,
         args: Record<string, unknown>,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<any> {
         await this.connect();
         if (!this.client) {
@@ -2539,6 +2563,14 @@ export class McpAccessClient {
         const toolPrefix = cfg.get<string>("mcp.toolPrefix", "access").trim();
         const name = toolPrefix ? `${toolPrefix}_${toolSuffix}` : toolSuffix;
 
+        if (options?.onlyIfCurrentDatabase && (typeof args.db_path !== "string"
+            || this.lastUsedDbPath === undefined
+            || normalizeDbPath(args.db_path) !== normalizeDbPath(this.lastUsedDbPath))) {
+            throw new BackgroundMetadataBlockedError();
+        }
+        if (options?.isAllowed && !options.isAllowed()) {
+            throw new SqlDocumentDispatchBlockedError();
+        }
         this.output.appendLine(`MCP call: ${name}`);
         if (typeof args.db_path === "string") {
             this.lastUsedDbPath = args.db_path;

@@ -2,11 +2,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
-import { GitUnavailableError, McpAccessClient } from "./mcp/mcpAccessClient";
+import { GitUnavailableError, McpAccessClient, SqlDocumentDispatchBlockedError } from "./mcp/mcpAccessClient";
 import { ACCESS_CATEGORIES } from "./models/types";
 import { AccessTreeProvider } from "./providers/accessTreeProvider";
 import { ConnectionStore, normalizeDbPath } from "./services/connectionStore";
 import { AccessMetadataService } from "./services/accessMetadataService";
+import { checkSqlDocumentConnection } from "./services/sqlDocumentConnection";
 import { registerAccessCompletionProviders, resolveSqlCompletionConnection } from "./providers/accessCompletionProvider";
 import { SecondBrainService } from "./services/secondBrainService";
 import { BulkExportService } from "./services/bulkExportService";
@@ -54,10 +55,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const codeDocuments = new Map<string, AccessCodeMeta>();
     const queryDocuments = new Map<string, AccessQueryMeta>();
+    const unboundScratchDocuments = new Set<string>();
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
             codeDocuments.delete(doc.uri.toString());
             queryDocuments.delete(doc.uri.toString());
+            unboundScratchDocuments.delete(doc.uri.toString());
             void updateEditorActionContexts();
         })
     );
@@ -66,7 +69,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Database-aware completion (VBA "Forms!" / SQL "alias."): read-only, cached metadata, Access documents only.
     const intellisenseOutput = vscode.window.createOutputChannel("Access Explorer IntelliSense");
-    const metadataService = new AccessMetadataService(mcpClient, {
+    const metadataService = new AccessMetadataService({
+        listObjects: (connection, objectType) => mcpClient.listObjects(connection, objectType, undefined, { onlyIfCurrentDatabase: true }),
+        getControls: (connection, objectType, objectName) => mcpClient.getControls(connection, objectType, objectName, undefined, { onlyIfCurrentDatabase: true }),
+        getTableFields: (connection, tableName) => mcpClient.getTableFields(connection, tableName, { onlyIfCurrentDatabase: true })
+    }, {
         // Never let a background completion switch the database the MCP session is working on.
         canLoad: (connection) => {
             const lastUsed = mcpClient.getLastUsedDbPath();
@@ -80,7 +87,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const resolveBoundConnection = (
         meta: { connection: import("./models/types").AccessConnection } | undefined
     ): import("./models/types").AccessConnection | undefined =>
-        meta ? connectionStore.getAll().find((connection) => connection.id === meta.connection.id) : undefined;
+        meta ? connectionStore.getAll().find((connection) => connection.id === meta.connection.id
+            && normalizeDbPath(connection.dbPath) === normalizeDbPath(meta.connection.dbPath)) : undefined;
     context.subscriptions.push(
         intellisenseOutput,
         registerAccessCompletionProviders({
@@ -144,8 +152,43 @@ export function activate(context: vscode.ExtensionContext): void {
         meta: AccessQueryMeta
     ): void {
         queryDocuments.set(document.uri.toString(), meta);
+        unboundScratchDocuments.delete(document.uri.toString());
         activeSqlConnection = meta.connection;
         void updateEditorActionContexts();
+    }
+
+    function bindScratchDocument(document: vscode.TextDocument, connection: import("./models/types").AccessConnection): void {
+        if (unboundScratchDocuments.has(document.uri.toString())) {
+            trackQueryDocument(document, { connection, isNew: true });
+        }
+    }
+
+    function checkedQueryConnection(
+        meta: AccessQueryMeta,
+        currentBound: import("./models/types").AccessConnection | null = meta.connection
+    ): import("./models/types").AccessConnection | undefined {
+        const check = checkSqlDocumentConnection(meta.connection, activeSqlConnection, connectionStore.getAll(), currentBound);
+        if (check.kind === "missing") {
+            void vscode.window.showErrorMessage(rt("sql.documentConnectionMissing", meta.connection.name));
+            return undefined;
+        }
+        if (check.kind === "mismatch") {
+            void vscode.window.showErrorMessage(rt("sql.documentConnectionMismatch", meta.connection.name));
+            return undefined;
+        }
+        return check.connection;
+    }
+
+    function queryDispatchGuard(document: vscode.TextDocument, connection: import("./models/types").AccessConnection): () => boolean {
+        const key = document.uri.toString();
+        const wasBound = queryDocuments.has(key);
+        return () => {
+            const current = queryDocuments.get(key);
+            const currentBound = document.isClosed || (wasBound && !current)
+                ? null
+                : current?.connection ?? connection;
+            return !!checkedQueryConnection({ connection }, currentBound);
+        };
     }
 
     function getActiveSqlMeta(editor: vscode.TextEditor | undefined): {
@@ -855,15 +898,16 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
         const trackedMeta = activeSql.meta;
-        const connection = trackedMeta?.connection
-            ?? activeSqlConnection
-            ?? await pickConnection(rt("query.pickSave"));
+        const connection = trackedMeta
+            ? checkedQueryConnection(trackedMeta)
+            : activeSqlConnection ?? await pickConnection(rt("query.pickSave"));
 
         if (!connection) {
             return;
         }
 
         activeSqlConnection = connection;
+        bindScratchDocument(editor.document, connection);
         updateSqlStatusBar();
 
         const queryName = explicitQueryName
@@ -881,6 +925,11 @@ export function activate(context: vscode.ExtensionContext): void {
         const sql = editor.document.getText();
         if (!sql.trim()) {
             vscode.window.showWarningMessage(rt("query.sql.empty"));
+            return;
+        }
+
+        const isAllowed = queryDispatchGuard(editor.document, connection);
+        if (!isAllowed()) {
             return;
         }
 
@@ -907,7 +956,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 title: rt("query.saving", finalQueryName),
                 cancellable: false
             },
-            () => mcpClient.evalVba(connection, expression, 30000)
+            () => mcpClient.evalVba(connection, expression, 30000, isAllowed)
         );
 
         trackQueryDocument(editor.document, {
@@ -1718,7 +1767,11 @@ render();
     }
 
     // Helper to execute SQL and show result as markdown table (SELECT) or DML confirmation
-    async function runSqlAndShow(connection: import("./models/types").AccessConnection, sql: string): Promise<void> {
+    async function runSqlAndShow(
+        connection: import("./models/types").AccessConnection,
+        sql: string,
+        isAllowed: () => boolean = () => true
+    ): Promise<void> {
         const trimmed = sql.trim();
         const statements = splitSqlStatements(trimmed);
 
@@ -1738,6 +1791,9 @@ render();
                 }
             }
 
+            if (!isAllowed()) {
+                return;
+            }
             const results = await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: rt("sql.executing"), cancellable: false },
                 () => mcpClient.executeBatchSql(
@@ -1746,7 +1802,8 @@ render();
                         sql: statement,
                         label: `sql_${index + 1}`
                     })),
-                    true
+                    true,
+                    isAllowed
                 )
             );
 
@@ -1795,9 +1852,12 @@ render();
                 return;
             }
 
+            if (!isAllowed()) {
+                return;
+            }
             const result = await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: rt("sql.runningVerb", verb), cancellable: false },
-                () => mcpClient.executeDml(connection, trimmed)
+                () => mcpClient.executeDml(connection, trimmed, isAllowed)
             );
 
             const affected = result.rowsAffected;
@@ -1825,9 +1885,12 @@ render();
             return;
         }
 
+        if (!isAllowed()) {
+            return;
+        }
         const preview = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: rt("sql.executing"), cancellable: false },
-            () => mcpClient.executeRawSqlQuery(connection, trimmed)
+            () => mcpClient.executeRawSqlQuery(connection, trimmed, 500, isAllowed)
         );
         showResultsWebview(preview.sql, connection.name, preview.rows, preview.rowCount);
     }
@@ -1852,6 +1915,10 @@ render();
             });
             if (pick) {
                 activeSqlConnection = pick.connection;
+                const editor = vscode.window.activeTextEditor;
+                if (editor) {
+                    bindScratchDocument(editor.document, pick.connection);
+                }
                 updateSqlStatusBar();
             }
         })
@@ -1864,6 +1931,7 @@ render();
                 language: "sql",
                 content: ""
             });
+            unboundScratchDocuments.add(doc.uri.toString());
             await vscode.window.showTextDocument(doc);
             if (!activeSqlConnection) {
                 activeSqlConnection = await pickConnection(rt("sql.openEditor.pickConnection"));
@@ -2083,16 +2151,24 @@ render();
                 return;
             }
 
-            const connection = activeSqlConnection ?? await pickConnection(rt("sql.execute.pickConnection"));
+            const trackedMeta = queryDocuments.get(editor.document.uri.toString());
+            const connection = trackedMeta
+                ? checkedQueryConnection(trackedMeta)
+                : activeSqlConnection ?? await pickConnection(rt("sql.execute.pickConnection"));
             if (!connection) {
                 return;
             }
             activeSqlConnection = connection;
+            bindScratchDocument(editor.document, connection);
             updateSqlStatusBar();
 
+            const isAllowed = queryDispatchGuard(editor.document, connection);
             try {
-                await runSqlAndShow(connection, sql);
+                await runSqlAndShow(connection, sql, isAllowed);
             } catch (error) {
+                if (error instanceof SqlDocumentDispatchBlockedError) {
+                    return;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(rt("sql.failed", message));
             }
@@ -2269,6 +2345,9 @@ render();
                     : undefined;
                 await saveQueryDocumentToAccess(editor, explicitQueryName);
             } catch (error) {
+                if (error instanceof SqlDocumentDispatchBlockedError) {
+                    return;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(rt("query.saveFailed", message));
             }

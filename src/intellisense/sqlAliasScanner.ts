@@ -229,6 +229,9 @@ function readTableReference(statement: Token[], index: number, add: (alias: stri
 
     const alias = statement[index];
     if (alias && isName(alias) && !(alias.kind === "word" && NOT_AN_ALIAS.has(alias.text.toLowerCase()))) {
+        if (statement[index + 1] && isWord(statement[index + 1], "in")) {
+            return -1;
+        }
         add(nameOf(alias), nameOf(table));
         return index + 1;
     }
@@ -245,7 +248,8 @@ function isSupportedSelect(statement: Token[]): boolean {
 
     return !statement.some((token, i) =>
         (token.kind === "word" && UNSUPPORTED_WORDS.has(token.text.toLowerCase()))
-        || (token.kind === "punct" && token.text === "(" && statement[i + 1] !== undefined && isWord(statement[i + 1], "select")));
+        || (token.kind === "punct" && token.text === "(" && statement[i + 1] !== undefined && isWord(statement[i + 1], "select"))
+        || (isWord(token, "in") && statement[i + 1]?.kind === "string"));
 }
 
 function isWord(token: Token, word: string): boolean {

@@ -76,7 +76,31 @@ describe("resolveSqlQualifier", () => {
         assert.equal(resolve("SELECT o.|\nFROM Orders o, Customers o"), undefined);
         assert.equal(resolve("SELECT o.|\nFROM dbo.Orders o"), undefined);
         assert.equal(resolve("SELECT Orders.|\nFROM Orders IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM Orders AS o IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM Orders o IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT c.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) IN 'other.accdb'"), undefined);
         assert.equal(resolve("SELECT db.o.|\nFROM Orders o"), undefined);
+    });
+
+    it("supports local joins with a normal IN predicate", () => {
+        assert.equal(resolve("SELECT o.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) WHERE (o.ID) IN (1, 2)")?.source, "Orders");
+    });
+
+    it("does not bind any alias in a query with an external database clause", () => {
+        for (const sample of [
+            "SELECT c.| FROM Customers c INNER JOIN Orders o ON c.ID = o.CustomerID IN 'other.accdb'",
+            'SELECT c.| FROM Customers c, Orders o IN "other.accdb"'
+        ]) {
+            const { text, offset } = withCursor(sample);
+            assert.deepEqual(findSourceBindings(text, offset), []);
+            assert.equal(resolveSqlQualifier(text, offset), undefined);
+        }
+    });
+
+    it("does not treat quoted text or comments as an external database clause", () => {
+        assert.equal(resolve("SELECT o.| FROM Orders o WHERE o.Note = 'IN ''other.accdb'''")?.source, "Orders");
+        assert.equal(resolve("SELECT o.| FROM Orders o -- IN 'other.accdb'")?.source, "Orders");
     });
 
     it("does not trigger inside strings, comments or without a dot", () => {

@@ -144,7 +144,7 @@ After installing the extension, these settings are available in VS Code **Settin
 3. Save with **Access: Save Code to Access**.
 4. Compile with **Access: Compile Module** or **Access: Compile VBA**.
 
-For Access documents, IntelliSense suggests forms after `Forms!`, form controls after `Forms!FormName!`, and table fields after a SQL alias such as `o.` in supported SELECT queries. SQL suggestions pause if the document's connection differs from the selected SQL connection; select the document's connection to resume. Metadata loads may require Access to be on the same database.
+For Access documents, IntelliSense suggests forms after `Forms!`, form controls after `Forms!FormName!`, and table fields after a SQL alias such as `o.` in supported SELECT queries. If a SQL document's connection differs from the selected SQL connection, suggestions pause and running or saving the document is blocked; select the document's connection to continue. Metadata loads may require Access to be on the same database.
 
 ### 3) Data migration with CSV/XLSX
 

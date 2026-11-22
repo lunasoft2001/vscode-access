@@ -1,5 +1,12 @@
 import type { AccessConnection, AccessControlInfo, AccessObjectInfo, AccessTableFieldInfo } from "../models/types";
 
+export class BackgroundMetadataBlockedError extends Error {
+    constructor() {
+        super("Background metadata request blocked because the active Access database changed.");
+        this.name = "BackgroundMetadataBlockedError";
+    }
+}
+
 export interface FormInfo {
     name: string;
 }
@@ -138,6 +145,10 @@ export class AccessMetadataService {
             },
             (error) => {
                 target.pending = undefined;
+                if (error instanceof BackgroundMetadataBlockedError) {
+                    this.options.onLoadBlocked?.(connection);
+                    return [] as readonly T[];
+                }
                 target.failedAt = this.now();
                 const message = error instanceof Error ? error.message : String(error);
                 this.options.onDiagnostic?.(`Failed loading ${slotKey} for '${connection.name}': ${message}`);
