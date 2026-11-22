@@ -197,7 +197,7 @@ From the next versions onward, this section will be updated with each release (f
 
 **Access Explorer** is developed and maintained by [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
 
-Thanks to [Sachin (@asachin96)](https://github.com/asachin96) for the database-aware IntelliSense proof of concept.
+Special thanks to [Sachin (@asachin96)](https://github.com/asachin96) for his advice, reviews, and guidance throughout the Access Explorer project, and for the database-aware IntelliSense proof of concept.
 
 This extension uses **[MCP-Access](https://github.com/unmateria/MCP-Access)** as the backend server to communicate with Microsoft Access.  
 MCP-Access is an independent project distributed under its own license. All rights belong to their respective authors.
