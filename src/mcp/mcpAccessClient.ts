@@ -22,6 +22,10 @@ import { rt } from "../utils/runtimeL10n";
 import { BackgroundMetadataBlockedError } from "../services/accessMetadataService";
 import { normalizeDbPath } from "../services/connectionStore";
 
+class MissingServerScriptError extends Error {}
+
+export class GitUnavailableError extends Error {}
+
 interface AccessReference {
     name: string;
     guid?: string;
@@ -115,6 +119,7 @@ export interface McpRuntimeInfo {
 }
 
 const MCP_ACCESS_REPOSITORY_URL = "https://github.com/unmateria/MCP-Access.git";
+const PREREQUISITE_PROBE_TIMEOUT_MS = 30_000;
 const MCP_ACCESS_ARCHIVE_URL = "https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip";
 
 export class McpAccessClient {
@@ -213,42 +218,35 @@ export class McpAccessClient {
     private async getManagedMcpVersionInfo(repoDir: string): Promise<McpVersionInfo> {
         if (!fs.existsSync(repoDir)) {
             return {
-                version: "no instalado",
+                version: rt("runtime.notInstalled"),
                 commit: "n/a",
                 originUrl: MCP_ACCESS_REPOSITORY_URL
             };
         }
 
+        const packageVersion = this.tryReadMcpPackageVersion(repoDir);
         const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
         if (!hasGitMetadata) {
-            const zipVersion = this.tryExtractMcpVersionFromFiles(repoDir);
             return {
-                version: zipVersion || "desconocida (instalado por ZIP)",
+                version: packageVersion || rt("runtime.zipUnknown"),
                 commit: "n/a",
                 originUrl: MCP_ACCESS_ARCHIVE_URL
             };
         }
 
-        const [tagResult, commitResult, logResult, originResult] = await Promise.all([
-            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--abbrev=0"], undefined, true),
+        const [tagResult, commitResult, originResult] = await Promise.all([
+            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--exact-match", "HEAD"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
-            this.runCommand("git", ["-C", repoDir, "log", "-1", "--format=%s"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
         ]);
 
-        // Try to extract version from commit message (e.g., "v0.7.43: wedged-session detection")
-        let version = "sin tag";
-        if (tagResult.exitCode === 0) {
-            version = tagResult.stdout || "sin tag";
-        } else if (logResult.exitCode === 0) {
-            const commitMsg = logResult.stdout || "";
-            const versionMatch = commitMsg.match(/v\d+\.\d+\.\d+/);
-            if (versionMatch) {
-                version = versionMatch[0];
-            } else {
-                // Fallback to commit hash if no version pattern found
-                version = `commit ${commitResult.stdout || "n/a"}`;
-            }
+        let version = rt("runtime.noTag");
+        if (packageVersion) {
+            version = packageVersion;
+        } else if (tagResult.exitCode === 0) {
+            version = tagResult.stdout || rt("runtime.noTag");
+        } else if (commitResult.exitCode === 0 && commitResult.stdout) {
+            version = `commit ${commitResult.stdout}`;
         }
 
         return {
@@ -265,17 +263,17 @@ export class McpAccessClient {
         const repoDir = path.join(baseDir, "MCP-Access");
 
         if (!fs.existsSync(repoDir)) {
-            throw new Error("El runtime MCP no está instalado todavía. Conéctate una vez para instalarlo.");
+            throw new Error(rt("mcp.notInstalledConnect"));
         }
 
         const gitAvailable = await this.commandAvailable("git", ["--version"]);
         if (!gitAvailable) {
-            throw new Error("Git no está disponible en este sistema.");
+            throw new GitUnavailableError(rt("mcp.gitUnavailable"));
         }
 
         const initResult = await this.runCommand("git", ["-C", repoDir, "init"], undefined, true);
         if (initResult.exitCode !== 0) {
-            throw new Error(`No se pudo inicializar git en el runtime MCP. ${initResult.stderr || initResult.stdout}`);
+            throw new Error(rt("mcp.gitInitFailed", initResult.stderr || initResult.stdout));
         }
 
         const originResult = await this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true);
@@ -287,7 +285,7 @@ export class McpAccessClient {
                 true
             );
             if (addOrigin.exitCode !== 0) {
-                throw new Error(`No se pudo configurar el remoto origin. ${addOrigin.stderr || addOrigin.stdout}`);
+                throw new Error(rt("mcp.gitOriginAddFailed", addOrigin.stderr || addOrigin.stdout));
             }
         } else if ((originResult.stdout || "").trim() !== MCP_ACCESS_REPOSITORY_URL) {
             const setOrigin = await this.runCommand(
@@ -297,13 +295,13 @@ export class McpAccessClient {
                 true
             );
             if (setOrigin.exitCode !== 0) {
-                throw new Error(`No se pudo actualizar el remoto origin. ${setOrigin.stderr || setOrigin.stdout}`);
+                throw new Error(rt("mcp.gitOriginUpdateFailed", setOrigin.stderr || setOrigin.stdout));
             }
         }
 
         const fetchResult = await this.runCommand("git", ["-C", repoDir, "fetch", "origin", "main"], undefined, true);
         if (fetchResult.exitCode !== 0) {
-            throw new Error(`No se pudo descargar la rama main desde origin. ${fetchResult.stderr || fetchResult.stdout}`);
+            throw new Error(rt("mcp.gitFetchFailed", fetchResult.stderr || fetchResult.stdout));
         }
 
         const checkoutResult = await this.runCommand(
@@ -313,7 +311,7 @@ export class McpAccessClient {
             true
         );
         if (checkoutResult.exitCode !== 0) {
-            throw new Error(`No se pudo dejar el runtime MCP en seguimiento de origin/main. ${checkoutResult.stderr || checkoutResult.stdout}`);
+            throw new Error(rt("mcp.gitTrackFailed", checkoutResult.stderr || checkoutResult.stdout));
         }
 
         const pullResult = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
@@ -368,7 +366,7 @@ export class McpAccessClient {
         const repoDir = path.join(baseDir, "MCP-Access");
 
         if (!fs.existsSync(repoDir)) {
-            throw new Error("El runtime MCP no está instalado todavía.");
+            throw new Error(rt("mcp.notInstalled"));
         }
 
         const gitAvailable = await this.commandAvailable("git", ["--version"]);
@@ -377,12 +375,12 @@ export class McpAccessClient {
         if (gitAvailable && hasGitMetadata) {
             const fetch = await this.runCommand("git", ["-C", repoDir, "fetch", "origin", "main"], undefined, true);
             if (fetch.exitCode !== 0) {
-                throw new Error(`No se pudo descargar origin/main para MCP-Access. ${fetch.stderr || fetch.stdout}`);
+                throw new Error(rt("mcp.gitUpdateFetchFailed", fetch.stderr || fetch.stdout));
             }
 
             const pull = await this.runCommand("git", ["-C", repoDir, "pull", "--ff-only"], undefined, true);
             if (pull.exitCode !== 0) {
-                throw new Error(`No se pudo actualizar MCP-Access con git pull. ${pull.stderr || pull.stdout}`);
+                throw new Error(rt("mcp.gitPullFailed", pull.stderr || pull.stdout));
             }
         } else {
             await this.downloadMcpAccessZipWithBackup(baseDir, repoDir);
@@ -392,34 +390,38 @@ export class McpAccessClient {
         return this.getMcpRuntimeInfo();
     }
 
-    private tryExtractMcpVersionFromFiles(repoDir: string): string | undefined {
-        const candidateFiles = [
-            path.join(repoDir, "README.md"),
-            path.join(repoDir, "readme.md"),
-            path.join(repoDir, "CLAUDE.md")
-        ];
-
-        for (const filePath of candidateFiles) {
-            if (!fs.existsSync(filePath)) {
-                continue;
-            }
-
-            try {
-                const content = fs.readFileSync(filePath, "utf8");
-                const changelogVersionMatch = content.match(/###\s+(v\d+\.\d+\.\d+)\b/i);
-                if (changelogVersionMatch?.[1]) {
-                    return changelogVersionMatch[1];
-                }
-
-                const genericVersionMatch = content.match(/\b(v\d+\.\d+\.\d+)\b/i);
-                if (genericVersionMatch?.[1]) {
-                    return genericVersionMatch[1];
-                }
-            } catch {
-                // ignore unreadable files and try next candidate
-            }
+    private tryReadMcpPackageVersion(repoDir: string): string | undefined {
+        const filePath = path.join(repoDir, "pyproject.toml");
+        if (!fs.existsSync(filePath)) {
+            return undefined;
         }
 
+        let content: string;
+        try {
+            content = fs.readFileSync(filePath, "utf8");
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`Could not read MCP package metadata: ${details}`);
+            return undefined;
+        }
+        let inProject = false;
+        for (const line of content.split(/\r?\n/)) {
+            if (inProject && /^\s*\[\[/.test(line)) {
+                break;
+            }
+            const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+            if (section) {
+                if (inProject) {
+                    break;
+                }
+                inProject = section[1] === "project";
+            } else if (inProject) {
+                const version = line.match(/^\s*version\s*=\s*["'](\d+\.\d+\.\d+)["']\s*(?:#.*)?$/)?.[1];
+                if (version) {
+                    return `v${version}`;
+                }
+            }
+        }
         return undefined;
     }
 
@@ -465,7 +467,7 @@ export class McpAccessClient {
 
         const sha = parsed.sha?.trim();
         if (!sha) {
-            throw new Error("No se pudo determinar el commit remoto de MCP-Access.");
+            throw new Error(rt("mcp.remoteCommitFailed"));
         }
 
         const message = parsed.commit?.message ?? "";
@@ -793,13 +795,10 @@ export class McpAccessClient {
 
         const finalMessage = lastError instanceof Error ? lastError.message : String(lastError ?? "");
         if (isTimeoutError(finalMessage)) {
-            throw new Error(
-                `No se pudieron cargar los datos de la tabla '${tableName}' por timeout. `
-                + "Prueba con menos filas o aumenta accessExplorer.mcp.sqlQueryTimeoutMs."
-            );
+            throw new Error(rt("mcp.tableTimeout", tableName));
         }
 
-        throw (lastError instanceof Error ? lastError : new Error(finalMessage || "Error al cargar datos de tabla."));
+        throw (lastError instanceof Error ? lastError : new Error(finalMessage || rt("mcp.tableLoadFailed")));
     }
 
     async getQuerySql(connection: AccessConnection, queryName: string, timeoutOverrideMs?: number): Promise<string> {
@@ -1443,9 +1442,7 @@ export class McpAccessClient {
 
             const rawReason = error instanceof Error ? error.message : String(error);
             const reason = this.enrichConnectError(rawReason);
-            throw new Error(
-                `No se pudo conectar con MCP-Access. ${reason}`
-            );
+            throw new Error(rt("mcp.connectFailed", reason));
         }
     }
 
@@ -1580,13 +1577,16 @@ export class McpAccessClient {
     private async runPrerequisiteCheck(): Promise<PrerequisiteState> {
         const cfg = this.getConfig();
         let serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+        this.output.appendLine("Checking Python availability...");
         let pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
         const autoEnableVbaTrust = cfg.get<boolean>("mcp.autoEnableVbaTrust", false);
         if (autoEnableVbaTrust) {
             await this.tryEnableVbaTrustAutomatically();
         }
 
+        this.output.appendLine("Checking MCP Python imports...");
         const validated = await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+        this.output.appendLine("Prerequisite checks completed.");
         pythonCommand = validated.pythonCommand;
         serverScriptPath = validated.serverScriptPath;
 
@@ -1629,8 +1629,7 @@ export class McpAccessClient {
         try {
             return this.resolveServerScriptPath(cfg);
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (!this.isMissingServerScriptError(message)) {
+            if (!(error instanceof MissingServerScriptError)) {
                 throw error;
             }
 
@@ -1650,9 +1649,7 @@ export class McpAccessClient {
                     "workbench.action.openSettings",
                     "accessExplorer.mcp.serverScriptPath"
                 );
-                throw new Error(
-                    "Configura accessExplorer.mcp.serverScriptPath con la ruta de access_mcp_server.py."
-                );
+                throw new Error(rt("mcp.scriptConfigure"));
             }
 
             if (action !== rt("mcp.install.auto")) {
@@ -1694,7 +1691,7 @@ export class McpAccessClient {
             if (fs.existsSync(configuredPath)) {
                 return configuredPath;
             }
-            throw new Error(`No existe access_mcp_server.py en: ${configuredPath}`);
+            throw new MissingServerScriptError(rt("mcp.scriptMissing", configuredPath));
         }
 
         const managedBaseDir = this.getManagedRuntimeBaseDir();
@@ -1731,14 +1728,7 @@ export class McpAccessClient {
             return found;
         }
 
-        throw new Error(
-            "Configura accessExplorer.mcp.serverScriptPath con la ruta absoluta de access_mcp_server.py."
-        );
-    }
-
-    private isMissingServerScriptError(message: string): boolean {
-        return message.includes("No existe access_mcp_server.py")
-            || message.includes("Configura accessExplorer.mcp.serverScriptPath");
+        throw new MissingServerScriptError(rt("mcp.scriptConfigure"));
     }
 
     private async installMcpAccessDefault(): Promise<void> {
@@ -1797,7 +1787,7 @@ export class McpAccessClient {
 
         const venvPython = path.join(venvDir, "Scripts", "python.exe");
         if (!fs.existsSync(venvPython)) {
-            throw new Error(`No se encontró Python del entorno virtual en: ${venvPython}`);
+            throw new Error(rt("mcp.venvPythonMissing", venvPython));
         }
 
         if (uvAvailable) {
@@ -1855,7 +1845,7 @@ export class McpAccessClient {
         }
 
         if (!fs.existsSync(serverScriptPath)) {
-            throw new Error(`Instalación incompleta: no existe ${serverScriptPath}`);
+            throw new Error(rt("mcp.installIncomplete", serverScriptPath));
         }
     }
 
@@ -2024,9 +2014,7 @@ export class McpAccessClient {
         }
 
         if (depInstall.exitCode !== 0) {
-            throw new Error(
-                `No se pudieron instalar dependencias Python base (mcp, pywin32, Pillow): ${depInstall.stderr || depInstall.stdout}`
-            );
+            throw new Error(rt("mcp.dependenciesFailed", depInstall.stderr || depInstall.stdout));
         }
     }
 
@@ -2133,9 +2121,7 @@ export class McpAccessClient {
                 ]
             });
 
-            throw new Error(
-                `No se puede ejecutar Python con '${pythonCommand}'. Revisa accessExplorer.mcp.pythonCommand.`
-            );
+            throw new Error(rt("python.cannotRun", pythonCommand));
         }
 
         return pythonCommand;
@@ -2153,7 +2139,7 @@ export class McpAccessClient {
                     "Reinicia VS Code al terminar."
                 ]
             });
-            throw new Error("No se encontró winget para instalar Python automáticamente.");
+            throw new Error(rt("python.wingetMissing"));
         }
 
         const wingetInstallArgs = [
@@ -2186,17 +2172,13 @@ export class McpAccessClient {
             );
 
             if (fallbackInstall.exitCode !== 0) {
-                throw new Error(
-                    `No se pudo instalar Python automáticamente con winget. ${fallbackInstall.stderr || fallbackInstall.stdout}`
-                );
+                throw new Error(rt("python.wingetFailed", fallbackInstall.stderr || fallbackInstall.stdout));
             }
         }
 
         const installed = this.findSystemPythonExecutable();
         if (!installed) {
-            throw new Error(
-                "Python parece haberse instalado, pero no se pudo localizar python.exe automáticamente."
-            );
+            throw new Error(rt("python.notLocated"));
         }
 
         await this.getConfig().update("mcp.pythonCommand", installed, vscode.ConfigurationTarget.Global);
@@ -2215,7 +2197,7 @@ export class McpAccessClient {
             return { pythonCommand: currentPython, serverScriptPath: currentScript };
         }
 
-        const firstDetails = probeResult.stderr || probeResult.stdout || "Dependencias MCP-Access no disponibles.";
+        const firstDetails = probeResult.stderr || probeResult.stdout || rt("mcp.dependenciesUnavailable");
         const firstMissingModule = this.extractMissingModule(firstDetails);
 
         if (firstMissingModule && ["pil", "pillow"].includes(firstMissingModule.toLowerCase())) {
@@ -2243,16 +2225,16 @@ export class McpAccessClient {
         const secondMissingModule = this.extractMissingModule(secondDetails);
         if (secondMissingModule && secondMissingModule.toLowerCase().startsWith("mcp_access")) {
             const action = await vscode.window.showWarningMessage(
-                "MCP-Access parece no estar instalado correctamente. ¿Quieres instalarlo/repararlo desde https://github.com/unmateria/MCP-Access?",
-                "Instalar/Reparar MCP-Access",
-                "Abrir repositorio"
+                rt("mcp.repairPrompt"),
+                rt("mcp.repairButton"),
+                rt("mcp.openRepository")
             );
 
-            if (action === "Abrir repositorio") {
+            if (action === rt("mcp.openRepository")) {
                 await vscode.env.openExternal(vscode.Uri.parse("https://github.com/unmateria/MCP-Access"));
             }
 
-            if (action === "Instalar/Reparar MCP-Access") {
+            if (action === rt("mcp.repairButton")) {
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
@@ -2288,11 +2270,7 @@ export class McpAccessClient {
                 `Si el script no está en la ruta esperada, configura accessExplorer.mcp.serverScriptPath con la ruta de ${currentScript}.`
             ]
         });
-        throw new Error(
-            "El entorno de MCP-Access no está listo. "
-            + "Comprueba que estén instalados los paquetes Python 'mcp', 'pywin32' y 'Pillow'. "
-            + details
-        );
+        throw new Error(rt("mcp.environmentNotReady", details));
     }
 
     private async runServerImportProbe(pythonCommand: string, serverScriptPath: string): Promise<ShellResult> {
@@ -2311,7 +2289,8 @@ export class McpAccessClient {
             pythonCommand,
             ["-c", importProbe],
             undefined,
-            true
+            true,
+            PREREQUISITE_PROBE_TIMEOUT_MS
         );
     }
 
@@ -2323,10 +2302,7 @@ export class McpAccessClient {
     private enrichConnectError(reason: string): string {
         const normalized = reason.toLowerCase();
         if (normalized.includes("connection closed")) {
-            return [
-                "El proceso Python de MCP-Access se cerró al iniciar.",
-                "Orden recomendado de resolución: 1) instalar Python 3.9+, 2) instalar paquetes 'mcp' y 'pywin32', 3) comprobar que Microsoft Access está instalado, 4) activar 'Trust access to the VBA project object model' en Access."
-            ].join(" ");
+            return rt("mcp.connectionClosed");
         }
 
         return reason;
@@ -2435,7 +2411,7 @@ export class McpAccessClient {
     }
 
     private async commandAvailable(command: string, args: string[]): Promise<boolean> {
-        const result = await this.runCommand(command, args, undefined, true);
+        const result = await this.runCommand(command, args, undefined, true, PREREQUISITE_PROBE_TIMEOUT_MS);
         return result.exitCode === 0;
     }
 
@@ -2492,7 +2468,8 @@ export class McpAccessClient {
         command: string,
         args: string[],
         cwd?: string,
-        allowFailure = false
+        allowFailure = false,
+        timeoutMs?: number
     ): Promise<ShellResult> {
         return new Promise((resolve, reject) => {
             const child = spawn(command, args, {
@@ -2503,6 +2480,12 @@ export class McpAccessClient {
 
             let stdout = "";
             let stderr = "";
+            const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+                const message = rt("startup.probeTimeout", command, timeoutMs / 1000);
+                this.output.appendLine(message);
+                child.kill();
+                reject(new Error(message));
+            }, timeoutMs);
 
             child.stdout.on("data", (chunk: Buffer) => {
                 stdout += chunk.toString();
@@ -2513,6 +2496,7 @@ export class McpAccessClient {
             });
 
             child.on("error", (spawnError) => {
+                if (timer) { clearTimeout(timer); }
                 if (allowFailure) {
                     resolve({ exitCode: -1, stdout, stderr: spawnError.message || stderr });
                     return;
@@ -2521,6 +2505,7 @@ export class McpAccessClient {
             });
 
             child.on("close", (code) => {
+                if (timer) { clearTimeout(timer); }
                 const exitCode = code ?? -1;
                 const result: ShellResult = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 
@@ -2570,7 +2555,7 @@ export class McpAccessClient {
     ): Promise<any> {
         await this.connect();
         if (!this.client) {
-            throw new Error("No fue posible inicializar el cliente MCP.");
+            throw new Error(rt("mcp.clientUnavailable"));
         }
 
         const cfg = this.getConfig();
@@ -2643,7 +2628,7 @@ export class McpAccessClient {
         }
 
         if (text.includes("La base de datos ya está abierta")) {
-            return "La base de datos ya esta abierta en Microsoft Access. Cierra Access (todas las ventanas), luego ejecuta Access: Reconnect MCP y Access: Refresh.";
+            return rt("mcp.alreadyOpen");
         }
 
         const messageMatch = text.match(/Message:\s*([^\n]+)/i);
@@ -2708,7 +2693,7 @@ export class McpAccessClient {
             if (status === "compiled") {
                 return {
                     status,
-                    message: "Compilacion correcta."
+                    message: rt("vba.compile.success")
                 };
             }
 
@@ -2727,9 +2712,9 @@ export class McpAccessClient {
                 const line = payload.error_location.line;
 
                 const locationParts = [
-                    moduleName ? `Modulo: ${moduleName}` : "",
-                    procName ? `Procedimiento: ${procName}` : "",
-                    typeof line === "number" ? `Linea: ${line}` : ""
+                    moduleName ? rt("vba.compile.locationModule", moduleName) : "",
+                    procName ? rt("vba.compile.locationProcedure", procName) : "",
+                    typeof line === "number" ? rt("vba.compile.locationLine", line) : ""
                 ].filter(Boolean);
 
                 if (locationParts.length > 0) {
@@ -2741,8 +2726,8 @@ export class McpAccessClient {
                 const details = payload.errors
                     .slice(0, 10)
                     .map((item: any) => {
-                        const moduleName = typeof item?.module === "string" ? item.module : "Modulo";
-                        const line = typeof item?.line === "number" ? ` linea ${item.line}` : "";
+                        const moduleName = typeof item?.module === "string" ? item.module : rt("vba.compile.module");
+                        const line = typeof item?.line === "number" ? ` ${rt("vba.compile.locationLine", item.line)}` : "";
                         const error = typeof item?.error === "string" ? item.error : this.stringifyPayload(item);
                         return `${moduleName}${line}: ${error}`;
                     });
@@ -2755,7 +2740,7 @@ export class McpAccessClient {
             };
         }
 
-        const text = this.extractText(payload) || this.stringifyPayload(payload) || "Resultado de compilacion desconocido.";
+        const text = this.extractText(payload) || this.stringifyPayload(payload) || rt("vba.compile.unknown");
         return {
             status: /compiled/i.test(text) && !/error/i.test(text) ? "compiled" : "error",
             message: text
