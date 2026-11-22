@@ -19,6 +19,8 @@ import {
     AccessTableFieldInfo
 } from "../models/types";
 import { rt } from "../utils/runtimeL10n";
+import { BackgroundMetadataBlockedError } from "../services/accessMetadataService";
+import { normalizeDbPath } from "../services/connectionStore";
 
 interface AccessReference {
     name: string;
@@ -78,6 +80,10 @@ interface McpVersionInfo {
     version: string;
     commit: string;
     originUrl: string;
+}
+
+interface MetadataRequestOptions {
+    onlyIfCurrentDatabase?: boolean;
 }
 
 export interface McpUpdateCheckInfo {
@@ -527,12 +533,13 @@ export class McpAccessClient {
     async listObjects(
         connection: AccessConnection,
         objectType: string,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<AccessObjectInfo[]> {
         const payload = await this.callTool("list_objects", {
             db_path: connection.dbPath,
             object_type: objectType
-        }, timeoutOverrideMs);
+        }, timeoutOverrideMs, options);
 
         const raw = this.extractObjectArray(payload, objectType);
 
@@ -725,11 +732,11 @@ export class McpAccessClient {
         };
     }
 
-    async getTableFields(connection: AccessConnection, tableName: string): Promise<AccessTableFieldInfo[]> {
+    async getTableFields(connection: AccessConnection, tableName: string, options?: MetadataRequestOptions): Promise<AccessTableFieldInfo[]> {
         const payload = await this.callTool("table_info", {
             db_path: connection.dbPath,
             table_name: tableName
-        });
+        }, undefined, options);
 
         const fields = Array.isArray(payload?.fields) ? payload.fields : [];
         return fields.map((field: any) => ({
@@ -1023,13 +1030,14 @@ export class McpAccessClient {
         connection: AccessConnection,
         objectType: "form" | "report",
         objectName: string,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<AccessControlInfo[]> {
         const payload = await this.callTool("list_controls", {
             db_path: connection.dbPath,
             object_type: objectType,
             object_name: objectName
-        }, timeoutOverrideMs);
+        }, timeoutOverrideMs, options);
 
         const controls = Array.isArray(payload?.controls) ? payload.controls : [];
         return controls.map((ctrl: any) => ({
@@ -2542,7 +2550,8 @@ export class McpAccessClient {
     private async callTool(
         toolSuffix: string,
         args: Record<string, unknown>,
-        timeoutOverrideMs?: number
+        timeoutOverrideMs?: number,
+        options?: MetadataRequestOptions
     ): Promise<any> {
         await this.connect();
         if (!this.client) {
@@ -2554,6 +2563,11 @@ export class McpAccessClient {
         const toolPrefix = cfg.get<string>("mcp.toolPrefix", "access").trim();
         const name = toolPrefix ? `${toolPrefix}_${toolSuffix}` : toolSuffix;
 
+        if (options?.onlyIfCurrentDatabase && (typeof args.db_path !== "string"
+            || this.lastUsedDbPath === undefined
+            || normalizeDbPath(args.db_path) !== normalizeDbPath(this.lastUsedDbPath))) {
+            throw new BackgroundMetadataBlockedError();
+        }
         this.output.appendLine(`MCP call: ${name}`);
         if (typeof args.db_path === "string") {
             this.lastUsedDbPath = args.db_path;

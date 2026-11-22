@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { AccessConnection, AccessControlInfo, AccessObjectInfo, AccessTableFieldInfo } from "../models/types";
-import { AccessMetadataService } from "../services/accessMetadataService";
+import { AccessMetadataService, BackgroundMetadataBlockedError } from "../services/accessMetadataService";
 import type { AccessMetadataSource } from "../services/accessMetadataService";
 
 const connectionA: AccessConnection = { id: "a", name: "Sales", dbPath: "C:\\db\\sales.accdb" };
@@ -174,5 +174,23 @@ describe("AccessMetadataService", () => {
 
         allowed = true;
         assert.equal((await service.getTables(connectionA)).length, 2);
+    });
+
+    it("reports a dispatch-time block without cooling down subsequent requests", async () => {
+        const source = new FakeSource();
+        const listObjects = source.listObjects.bind(source);
+        let blocked = true;
+        source.listObjects = async (...args) => {
+            if (blocked) {
+                blocked = false;
+                throw new BackgroundMetadataBlockedError();
+            }
+            return listObjects(...args);
+        };
+        const notices: string[] = [];
+        const service = new AccessMetadataService(source, { onLoadBlocked: (item) => notices.push(item.name) });
+        assert.deepEqual(await service.getForms(connectionA), []);
+        assert.deepEqual(notices, ["Sales"]);
+        assert.equal((await service.getForms(connectionA)).length, 2);
     });
 });

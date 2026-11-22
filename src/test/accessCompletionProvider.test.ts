@@ -65,7 +65,7 @@ function createDocument(text: string) {
     } as any;
 }
 
-function setup(bound: boolean, options?: { resolveSqlConnection?: () => AccessConnection | undefined; gate?: Promise<void> }) {
+function setup(bound: boolean, options?: { resolveSqlConnection?: () => AccessConnection | undefined; gate?: Promise<void>; fieldGate?: Promise<void>; onFieldsStarted?: () => void }) {
     const calls: string[] = [];
     const service = new AccessMetadataService({
         async listObjects(_c, type) {
@@ -79,6 +79,8 @@ function setup(bound: boolean, options?: { resolveSqlConnection?: () => AccessCo
         },
         async getTableFields() {
             calls.push("fields");
+            options?.onFieldsStarted?.();
+            await options?.fieldGate;
             return [{ name: "OrderID", type: "LONG" } as AccessTableFieldInfo];
         }
     });
@@ -155,6 +157,26 @@ describe("access completion providers", () => {
         release();
         assert.equal(await pending, undefined);
         assert.deepEqual(calls, ["list:table"], "must not request fields for the previous connection");
+    });
+
+    it("discards SQL completions if the selected connection changes while fields load", async () => {
+        let release!: () => void;
+        let started!: () => void;
+        const fieldGate = new Promise<void>((resolve) => { release = resolve; });
+        const fieldsStarted = new Promise<void>((resolve) => { started = resolve; });
+        let selected: AccessConnection | undefined = connection;
+        const { sql } = setup(true, {
+            fieldGate,
+            onFieldsStarted: started,
+            resolveSqlConnection: () => resolveSqlCompletionConnection(connection, selected)
+        });
+        const pending = sql.provider.provideCompletionItems(
+            createDocument("SELECT o.\nFROM Orders o"), new Position(0, 9), liveToken
+        );
+        await fieldsStarted;
+        selected = { ...connection, id: "b", dbPath: "C:\\db\\other.accdb" };
+        release();
+        assert.equal(await pending, undefined);
     });
 
     it("returns nothing when the request was cancelled", async () => {

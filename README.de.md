@@ -144,7 +144,7 @@ Nach der Installation sind folgende Einstellungen in den VS Code **Einstellungen
 3. Speichere mit **Access: Code in Access speichern**.
 4. Kompiliere mit **Access: Modul kompilieren** oder **Access: VBA kompilieren**.
 
-In Access-Dokumenten schlägt IntelliSense nach `Forms!` Formulare, nach `Forms!Formularname!` deren Steuerelemente und nach einem SQL-Alias wie `o.` Tabellenfelder in unterstützten SELECT-Abfragen vor. SQL-Vorschläge pausieren, wenn die Verbindung des Dokuments nicht mit der ausgewählten SQL-Verbindung übereinstimmt; wähle die Verbindung des Dokuments, um fortzufahren. Das Laden von Metadaten kann erfordern, dass Access dieselbe Datenbank verwendet.
+In Access-Dokumenten schlägt IntelliSense nach `Forms!` Formulare, nach `Forms!Formularname!` deren Steuerelemente und nach einem SQL-Alias wie `o.` Tabellenfelder in unterstützten SELECT-Abfragen vor. Wenn die Verbindung des SQL-Dokuments nicht mit der ausgewählten SQL-Verbindung übereinstimmt, pausieren die Vorschläge und das Ausführen oder Speichern wird blockiert; wähle die Verbindung des Dokuments, um fortzufahren. Das Laden von Metadaten kann erfordern, dass Access dieselbe Datenbank verwendet.
 
 ### 3) Datenmigration mit CSV/XLSX
 

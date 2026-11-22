@@ -53,6 +53,7 @@ export function unbracket(name: string): string {
 /** True when the end of the prefix is plain code: not inside a string literal and not in a ' or Rem comment. */
 function isInCode(prefix: string): boolean {
     let inString = false;
+    let inBracket = false;
     let atStatementStart = true;
 
     for (let i = 0; i < prefix.length; i++) {
@@ -65,6 +66,18 @@ function isInCode(prefix: string): boolean {
             continue;
         }
 
+        if (inBracket) {
+            if (ch === "]") {
+                inBracket = false;
+            }
+            continue;
+        }
+
+        if (ch === "[") {
+            inBracket = true;
+            atStatementStart = false;
+            continue;
+        }
         if (ch === "'") {
             return false;
         }

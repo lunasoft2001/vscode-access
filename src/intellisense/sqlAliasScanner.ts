@@ -229,6 +229,9 @@ function readTableReference(statement: Token[], index: number, add: (alias: stri
 
     const alias = statement[index];
     if (alias && isName(alias) && !(alias.kind === "word" && NOT_AN_ALIAS.has(alias.text.toLowerCase()))) {
+        if (statement[index + 1] && isWord(statement[index + 1], "in")) {
+            return -1;
+        }
         add(nameOf(alias), nameOf(table));
         return index + 1;
     }

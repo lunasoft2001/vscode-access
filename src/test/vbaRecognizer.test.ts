@@ -8,6 +8,7 @@ describe("recognizeVbaContext", () => {
         assert.deepEqual(recognizeVbaContext("    x = forms!frm"), { kind: "forms", partial: "frm" });
         assert.deepEqual(recognizeVbaContext("Debug.Print \"a\" & Forms!"), { kind: "forms", partial: "" });
         assert.deepEqual(recognizeVbaContext("Forms![Order"), { kind: "forms", partial: "[Order" });
+        assert.deepEqual(recognizeVbaContext("Forms![Customer's"), { kind: "forms", partial: "[Customer's" });
         assert.deepEqual(recognizeVbaContext("Remote = Forms!"), { kind: "forms", partial: "" });
     });
 
@@ -23,6 +24,10 @@ describe("recognizeVbaContext", () => {
         assert.deepEqual(
             recognizeVbaContext("Forms![Order Entry]!"),
             { kind: "formControls", formName: "Order Entry", partial: "" }
+        );
+        assert.deepEqual(
+            recognizeVbaContext("Forms![Customer's \"Orders\"]!"),
+            { kind: "formControls", formName: "Customer's \"Orders\"", partial: "" }
         );
     });
 

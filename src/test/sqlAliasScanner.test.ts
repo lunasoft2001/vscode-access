@@ -76,6 +76,8 @@ describe("resolveSqlQualifier", () => {
         assert.equal(resolve("SELECT o.|\nFROM Orders o, Customers o"), undefined);
         assert.equal(resolve("SELECT o.|\nFROM dbo.Orders o"), undefined);
         assert.equal(resolve("SELECT Orders.|\nFROM Orders IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM Orders AS o IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM Orders o IN 'other.accdb'"), undefined);
         assert.equal(resolve("SELECT db.o.|\nFROM Orders o"), undefined);
     });
 
