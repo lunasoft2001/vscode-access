@@ -68,13 +68,13 @@ code --install-extension access-explorer-x.x.x.vsix
 ```powershell
 git clone https://github.com/lunasoft2001/vscode-access.git
 cd vscode-access
-npm install
+npm ci
 npm run compile
-npx vsce package        # generates the .vsix file
+npx @vscode/vsce package # generates the .vsix file
 code --install-extension access-explorer-x.x.x.vsix
 ```
 
-Requires Node.js 18+ and `@vscode/vsce` (`npm install -g @vscode/vsce`).
+Building and packaging from source requires Node.js 22+. `npx` runs `@vscode/vsce` without a global installation.
 
 ### First run
 
