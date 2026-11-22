@@ -216,23 +216,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(treeView);
 
-    void vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Notification,
-            title: rt("startup.checkingPrerequisites"),
-            cancellable: false
-        },
-        async () => {
-            try {
-                await mcpClient.ensurePrerequisites();
-                await maybeNotifyMcpUpdate();
-                treeProvider.refresh();
-                await registerMcpServerSilently(context, mcpClient);
-            } catch {
-                // The client already shows diagnostics and recovery guidance.
-            }
+    void (async () => {
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: rt("startup.checkingPrerequisites"),
+                    cancellable: false
+                },
+                () => mcpClient.ensurePrerequisites()
+            );
+            treeProvider.refresh();
+            await registerMcpServerSilently(context, mcpClient);
+            await maybeNotifyMcpUpdate();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(rt("startup.checkFailed", message));
         }
-    );
+    })();
 
     context.subscriptions.push(
         vscode.commands.registerCommand("accessExplorer.registerMcpServer", async () => {

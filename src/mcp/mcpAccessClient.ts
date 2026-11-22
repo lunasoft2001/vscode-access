@@ -106,6 +106,7 @@ export interface McpRuntimeInfo {
 }
 
 const MCP_ACCESS_REPOSITORY_URL = "https://github.com/unmateria/MCP-Access.git";
+const PREREQUISITE_PROBE_TIMEOUT_MS = 30_000;
 const MCP_ACCESS_ARCHIVE_URL = "https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip";
 
 export class McpAccessClient {
@@ -210,36 +211,29 @@ export class McpAccessClient {
             };
         }
 
+        const packageVersion = this.tryReadMcpPackageVersion(repoDir);
         const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
         if (!hasGitMetadata) {
-            const zipVersion = this.tryExtractMcpVersionFromFiles(repoDir);
             return {
-                version: zipVersion || rt("runtime.zipUnknown"),
+                version: packageVersion || rt("runtime.zipUnknown"),
                 commit: "n/a",
                 originUrl: MCP_ACCESS_ARCHIVE_URL
             };
         }
 
-        const [tagResult, commitResult, logResult, originResult] = await Promise.all([
-            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--abbrev=0"], undefined, true),
+        const [tagResult, commitResult, originResult] = await Promise.all([
+            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--exact-match", "HEAD"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
-            this.runCommand("git", ["-C", repoDir, "log", "-1", "--format=%s"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
         ]);
 
-        // Try to extract version from commit message (e.g., "v0.7.43: wedged-session detection")
         let version = rt("runtime.noTag");
-        if (tagResult.exitCode === 0) {
+        if (packageVersion) {
+            version = packageVersion;
+        } else if (tagResult.exitCode === 0) {
             version = tagResult.stdout || rt("runtime.noTag");
-        } else if (logResult.exitCode === 0) {
-            const commitMsg = logResult.stdout || "";
-            const versionMatch = commitMsg.match(/v\d+\.\d+\.\d+/);
-            if (versionMatch) {
-                version = versionMatch[0];
-            } else {
-                // Fallback to commit hash if no version pattern found
-                version = `commit ${commitResult.stdout || "n/a"}`;
-            }
+        } else if (commitResult.exitCode === 0 && commitResult.stdout) {
+            version = `commit ${commitResult.stdout}`;
         }
 
         return {
@@ -383,34 +377,38 @@ export class McpAccessClient {
         return this.getMcpRuntimeInfo();
     }
 
-    private tryExtractMcpVersionFromFiles(repoDir: string): string | undefined {
-        const candidateFiles = [
-            path.join(repoDir, "README.md"),
-            path.join(repoDir, "readme.md"),
-            path.join(repoDir, "CLAUDE.md")
-        ];
-
-        for (const filePath of candidateFiles) {
-            if (!fs.existsSync(filePath)) {
-                continue;
-            }
-
-            try {
-                const content = fs.readFileSync(filePath, "utf8");
-                const changelogVersionMatch = content.match(/###\s+(v\d+\.\d+\.\d+)\b/i);
-                if (changelogVersionMatch?.[1]) {
-                    return changelogVersionMatch[1];
-                }
-
-                const genericVersionMatch = content.match(/\b(v\d+\.\d+\.\d+)\b/i);
-                if (genericVersionMatch?.[1]) {
-                    return genericVersionMatch[1];
-                }
-            } catch {
-                // ignore unreadable files and try next candidate
-            }
+    private tryReadMcpPackageVersion(repoDir: string): string | undefined {
+        const filePath = path.join(repoDir, "pyproject.toml");
+        if (!fs.existsSync(filePath)) {
+            return undefined;
         }
 
+        let content: string;
+        try {
+            content = fs.readFileSync(filePath, "utf8");
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`Could not read MCP package metadata: ${details}`);
+            return undefined;
+        }
+        let inProject = false;
+        for (const line of content.split(/\r?\n/)) {
+            if (inProject && /^\s*\[\[/.test(line)) {
+                break;
+            }
+            const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+            if (section) {
+                if (inProject) {
+                    break;
+                }
+                inProject = section[1] === "project";
+            } else if (inProject) {
+                const version = line.match(/^\s*version\s*=\s*["'](\d+\.\d+\.\d+)["']\s*(?:#.*)?$/)?.[1];
+                if (version) {
+                    return `v${version}`;
+                }
+            }
+        }
         return undefined;
     }
 
@@ -1556,13 +1554,16 @@ export class McpAccessClient {
     private async runPrerequisiteCheck(): Promise<PrerequisiteState> {
         const cfg = this.getConfig();
         let serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+        this.output.appendLine("Checking Python availability...");
         let pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
         const autoEnableVbaTrust = cfg.get<boolean>("mcp.autoEnableVbaTrust", false);
         if (autoEnableVbaTrust) {
             await this.tryEnableVbaTrustAutomatically();
         }
 
+        this.output.appendLine("Checking MCP Python imports...");
         const validated = await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+        this.output.appendLine("Prerequisite checks completed.");
         pythonCommand = validated.pythonCommand;
         serverScriptPath = validated.serverScriptPath;
 
@@ -2265,7 +2266,8 @@ export class McpAccessClient {
             pythonCommand,
             ["-c", importProbe],
             undefined,
-            true
+            true,
+            PREREQUISITE_PROBE_TIMEOUT_MS
         );
     }
 
@@ -2386,7 +2388,7 @@ export class McpAccessClient {
     }
 
     private async commandAvailable(command: string, args: string[]): Promise<boolean> {
-        const result = await this.runCommand(command, args, undefined, true);
+        const result = await this.runCommand(command, args, undefined, true, PREREQUISITE_PROBE_TIMEOUT_MS);
         return result.exitCode === 0;
     }
 
@@ -2443,7 +2445,8 @@ export class McpAccessClient {
         command: string,
         args: string[],
         cwd?: string,
-        allowFailure = false
+        allowFailure = false,
+        timeoutMs?: number
     ): Promise<ShellResult> {
         return new Promise((resolve, reject) => {
             const child = spawn(command, args, {
@@ -2454,6 +2457,12 @@ export class McpAccessClient {
 
             let stdout = "";
             let stderr = "";
+            const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+                const message = rt("startup.probeTimeout", command, timeoutMs / 1000);
+                this.output.appendLine(message);
+                child.kill();
+                reject(new Error(message));
+            }, timeoutMs);
 
             child.stdout.on("data", (chunk: Buffer) => {
                 stdout += chunk.toString();
@@ -2464,6 +2473,7 @@ export class McpAccessClient {
             });
 
             child.on("error", (spawnError) => {
+                if (timer) { clearTimeout(timer); }
                 if (allowFailure) {
                     resolve({ exitCode: -1, stdout, stderr: spawnError.message || stderr });
                     return;
@@ -2472,6 +2482,7 @@ export class McpAccessClient {
             });
 
             child.on("close", (code) => {
+                if (timer) { clearTimeout(timer); }
                 const exitCode = code ?? -1;
                 const result: ShellResult = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 
