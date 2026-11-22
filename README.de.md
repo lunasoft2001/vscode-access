@@ -195,7 +195,7 @@ Ab den nächsten Versionen wird dieser Abschnitt bei jedem Release aktualisiert 
 
 **Access Explorer** wurde entwickelt von [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
 
-Danke an [Sachin (@asachin96)](https://github.com/asachin96) für den Proof of Concept des datenbankbezogenen IntelliSense.
+Besonderer Dank gilt [Sachin (@asachin96)](https://github.com/asachin96) für seine Beratung, seine Reviews und seine Begleitung des gesamten Access-Explorer-Projekts sowie für den Proof of Concept des datenbankbezogenen IntelliSense.
 
 Diese Erweiterung verwendet **[MCP-Access](https://github.com/unmateria/MCP-Access)** als Backend-Server zur Kommunikation mit Microsoft Access.  
 MCP-Access ist ein unabhängiges Projekt unter eigener Lizenz. Alle Rechte liegen bei den jeweiligen Autoren.

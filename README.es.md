@@ -196,7 +196,7 @@ A partir de las próximas versiones, esta sección se actualizará en cada relea
 
 **Access Explorer** es una extensión desarrollada por [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
 
-Gracias a [Sachin (@asachin96)](https://github.com/asachin96) por la prueba de concepto de IntelliSense conectado a la base de datos.
+Un agradecimiento especial a [Sachin (@asachin96)](https://github.com/asachin96) por su asesoramiento, sus revisiones y su orientación en todo el proyecto Access Explorer, así como por la prueba de concepto de IntelliSense conectado a la base de datos.
 
 Esta extensión utiliza **[MCP-Access](https://github.com/unmateria/MCP-Access)** como servidor backend para comunicarse con Microsoft Access.  
 MCP-Access es un proyecto independiente distribuido bajo su propia licencia. Todos los derechos sobre MCP-Access pertenecen a sus respectivos autores.

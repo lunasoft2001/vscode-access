@@ -2,6 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+- **Credits**: Special thanks to [Sachin (@asachin96)](https://github.com/asachin96) for his advice, reviews, and guidance throughout Access Explorer, and for the database-aware IntelliSense proof of concept.
+
 ## 1.3.0 - 2026-11-22
 - **Database-aware IntelliSense**: Suggests forms and their controls in VBA, and table fields for SQL aliases in supported SELECT queries.
 - **Connection safety**: Pauses SQL suggestions when the document and selected SQL connection differ, and discards invalidated metadata.
