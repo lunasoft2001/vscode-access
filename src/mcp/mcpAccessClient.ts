@@ -102,6 +102,7 @@ export interface McpRuntimeInfo {
 }
 
 const MCP_ACCESS_REPOSITORY_URL = "https://github.com/unmateria/MCP-Access.git";
+const PREREQUISITE_PROBE_TIMEOUT_MS = 30_000;
 const MCP_ACCESS_ARCHIVE_URL = "https://github.com/unmateria/MCP-Access/archive/refs/heads/main.zip";
 
 export class McpAccessClient {
@@ -1557,13 +1558,16 @@ export class McpAccessClient {
     private async runPrerequisiteCheck(): Promise<PrerequisiteState> {
         const cfg = this.getConfig();
         let serverScriptPath = await this.resolveServerScriptPathWithInstaller(cfg);
+        this.output.appendLine("Checking Python availability...");
         let pythonCommand = await this.ensurePythonRuntime(cfg, serverScriptPath);
         const autoEnableVbaTrust = cfg.get<boolean>("mcp.autoEnableVbaTrust", false);
         if (autoEnableVbaTrust) {
             await this.tryEnableVbaTrustAutomatically();
         }
 
+        this.output.appendLine("Checking MCP Python imports...");
         const validated = await this.validateServerEnvironment(pythonCommand, serverScriptPath);
+        this.output.appendLine("Prerequisite checks completed.");
         pythonCommand = validated.pythonCommand;
         serverScriptPath = validated.serverScriptPath;
 
@@ -2288,7 +2292,8 @@ export class McpAccessClient {
             pythonCommand,
             ["-c", importProbe],
             undefined,
-            true
+            true,
+            PREREQUISITE_PROBE_TIMEOUT_MS
         );
     }
 
@@ -2412,7 +2417,7 @@ export class McpAccessClient {
     }
 
     private async commandAvailable(command: string, args: string[]): Promise<boolean> {
-        const result = await this.runCommand(command, args, undefined, true);
+        const result = await this.runCommand(command, args, undefined, true, PREREQUISITE_PROBE_TIMEOUT_MS);
         return result.exitCode === 0;
     }
 
@@ -2469,7 +2474,8 @@ export class McpAccessClient {
         command: string,
         args: string[],
         cwd?: string,
-        allowFailure = false
+        allowFailure = false,
+        timeoutMs?: number
     ): Promise<ShellResult> {
         return new Promise((resolve, reject) => {
             const child = spawn(command, args, {
@@ -2480,6 +2486,12 @@ export class McpAccessClient {
 
             let stdout = "";
             let stderr = "";
+            const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+                const message = rt("startup.probeTimeout", command, timeoutMs / 1000);
+                this.output.appendLine(message);
+                child.kill();
+                reject(new Error(message));
+            }, timeoutMs);
 
             child.stdout.on("data", (chunk: Buffer) => {
                 stdout += chunk.toString();
@@ -2490,6 +2502,7 @@ export class McpAccessClient {
             });
 
             child.on("error", (spawnError) => {
+                if (timer) { clearTimeout(timer); }
                 if (allowFailure) {
                     resolve({ exitCode: -1, stdout, stderr: spawnError.message || stderr });
                     return;
@@ -2498,6 +2511,7 @@ export class McpAccessClient {
             });
 
             child.on("close", (code) => {
+                if (timer) { clearTimeout(timer); }
                 const exitCode = code ?? -1;
                 const result: ShellResult = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
 
