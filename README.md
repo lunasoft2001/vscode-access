@@ -178,6 +178,7 @@ For Access documents, IntelliSense suggests forms after `Forms!`, form controls 
 This README now includes a short release summary for quick overview.
 For full details, see [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.3.1**: Localized runtime UI, improved MCP version reporting and startup progress, and stronger SQL connection safeguards.
 - **v1.3.0**: Database-aware IntelliSense for VBA forms and controls and SQL table fields, with a connection mismatch safeguard.
 - **v1.2.0**: Marketplace documentation overhaul and clearer onboarding (What You Can Do, 30-second start, workflows, command cheat sheet). Includes new feature discoverability for SQL batch execution, CSV/XLSX data transfer, and Find Usages.
 - **v1.1.4**: MCP version detection improved — now extracts version from commit messages when Git tags unavailable (e.g., "v0.7.43"), giving users better MCP build visibility.

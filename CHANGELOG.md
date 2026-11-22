@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 1.3.1 - 2026-11-22
+- **Runtime localization**: Localizes visible messages and panels in English, Spanish, and German, with English fallback for unsupported locales.
+- **Startup and MCP version**: Prevents the prerequisite progress indicator from waiting for update prompts and reports the installed MCP package version more accurately.
+- **Packaging and dependencies**: Includes the MCP client runtime in the Marketplace package and updates vulnerable dependencies.
+- **SQL connection safeguards**: Rechecks document connections before SQL and metadata dispatch, and avoids IntelliSense bindings for unsupported external database references. These checks do not provide atomic isolation from concurrent external MCP operations.
 - **Credits**: Special thanks to [Sachin (@asachin96)](https://github.com/asachin96) for his advice, reviews, and guidance throughout Access Explorer, and for the database-aware IntelliSense proof of concept.
 
 ## 1.3.0 - 2026-11-22

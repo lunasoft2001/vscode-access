@@ -178,6 +178,7 @@ In Access-Dokumenten schlägt IntelliSense nach `Forms!` Formulare, nach `Forms!
 Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
 Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.3.1**: Lokalisierte Oberfläche, verbesserte MCP-Versionsanzeige und Startfortschritt sowie stärkere Schutzmaßnahmen für SQL-Verbindungen.
 - **v1.3.0**: Datenbankbezogenes IntelliSense für VBA-Formulare und Steuerelemente sowie SQL-Tabellenfelder, mit Schutz bei unterschiedlichen Verbindungen.
 - **v1.2.0**: Umfassende Überarbeitung der Marketplace-Dokumentation und klareres Onboarding (Was Du machen kannst, 30-Sekunden-Start, Workflows, Befehlsübersicht). Bessere Sichtbarkeit neuer Funktionen wie SQL-Batch-Ausführung, CSV/XLSX-Datenübertragung und Verwendungen suchen.
 - **v1.1.4**: MCP-Versionserkennung verbessert — extrahiert jetzt die Version aus Commit-Nachrichten, wenn Git-Tags nicht verfügbar sind (z. B. "v0.7.43"), wodurch Benutzer bessere Sichtbarkeit des MCP-Builds erhalten.

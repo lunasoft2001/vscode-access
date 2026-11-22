@@ -19,6 +19,7 @@ This executes:
 - TypeScript compile
 - Release smoke checks (`scripts/smoke-release-checks.js`)
 - VSIX packaging to `.artifacts/access-explorer.vsix`
+- Verification that the VSIX contains the MCP client runtime
 
 ## 2) Version bump
 

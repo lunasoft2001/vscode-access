@@ -5,6 +5,7 @@ tsconfig.json
 tsconfig.test.json
 .test-build/**
 scripts/run-unit-tests.js
+scripts/verify-vsix.js
 **/*.map
 **/*.ts
 !dist/**
