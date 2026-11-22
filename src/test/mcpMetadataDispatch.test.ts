@@ -100,6 +100,49 @@ describe("background MCP metadata dispatch", () => {
             assert.equal(dispatched, false);
             assert.equal(restored, true);
         });
+
+        it("blocks alert suppression and DML when the connection changes during setup", async () => {
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => { release = resolve; });
+            let allowed = true;
+            let dispatched = false;
+            const client: InstanceType<typeof McpAccessClient> = Object.create(McpAccessClient.prototype);
+            Reflect.set(client, "connect", () => gate);
+            Reflect.set(client, "lastUsedDbPath", "C:\\db\\b.accdb");
+            Reflect.set(client, "client", { callTool: () => { dispatched = true; return Promise.resolve({ structuredContent: {} }); } });
+            Reflect.set(client, "getConfig", () => ({ get: (_key: string, fallback: unknown) => fallback }));
+            Reflect.set(client, "output", { appendLine() {} });
+
+            const pending = client.executeDml(a, "DELETE FROM Orders", () => allowed);
+            allowed = false;
+            release();
+
+            await assert.rejects(pending, SqlDocumentDispatchBlockedError);
+            assert.equal(dispatched, false);
+            assert.equal(client.getLastUsedDbPath(), "C:\\db\\b.accdb");
+        });
+
+        it("restores alerts if the connection changes after suppression dispatch", async () => {
+            let allowed = true;
+            const expressions: string[] = [];
+            const client: InstanceType<typeof McpAccessClient> = Object.create(McpAccessClient.prototype);
+            Reflect.set(client, "connect", async () => {});
+            Reflect.set(client, "client", {
+                callTool: ({ arguments: args }: { arguments: { expression: string } }) => {
+                    expressions.push(args.expression);
+                    allowed = false;
+                    return Promise.resolve({ structuredContent: {} });
+                }
+            });
+            Reflect.set(client, "getConfig", () => ({ get: (_key: string, fallback: unknown) => fallback }));
+            Reflect.set(client, "output", { appendLine() {} });
+
+            await assert.rejects(client.executeDml(a, "DELETE FROM Orders", () => allowed), SqlDocumentDispatchBlockedError);
+            assert.deepEqual(expressions, [
+                "Application.DisplayAlerts = False\nDoCmd.SetWarnings False",
+                "Application.DisplayAlerts = True\nDoCmd.SetWarnings True"
+            ]);
+        });
     });
 
     it("allows a guarded request when the normalized database path still matches", async () => {

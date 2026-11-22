@@ -78,7 +78,13 @@ describe("resolveSqlQualifier", () => {
         assert.equal(resolve("SELECT Orders.|\nFROM Orders IN 'other.accdb'"), undefined);
         assert.equal(resolve("SELECT o.| FROM Orders AS o IN 'other.accdb'"), undefined);
         assert.equal(resolve("SELECT o.| FROM Orders o IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT c.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) IN 'other.accdb'"), undefined);
+        assert.equal(resolve("SELECT o.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) IN 'other.accdb'"), undefined);
         assert.equal(resolve("SELECT db.o.|\nFROM Orders o"), undefined);
+    });
+
+    it("supports local joins with a normal IN predicate", () => {
+        assert.equal(resolve("SELECT o.| FROM (Customers c INNER JOIN Orders o ON c.ID = o.CustomerID) WHERE (o.ID) IN (1, 2)")?.source, "Orders");
     });
 
     it("does not trigger inside strings, comments or without a dot", () => {

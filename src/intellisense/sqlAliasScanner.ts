@@ -248,7 +248,9 @@ function isSupportedSelect(statement: Token[]): boolean {
 
     return !statement.some((token, i) =>
         (token.kind === "word" && UNSUPPORTED_WORDS.has(token.text.toLowerCase()))
-        || (token.kind === "punct" && token.text === "(" && statement[i + 1] !== undefined && isWord(statement[i + 1], "select")));
+        || (token.kind === "punct" && token.text === "(" && statement[i + 1] !== undefined && isWord(statement[i + 1], "select"))
+        || (token.kind === "punct" && token.text === ")" && statement[i + 1] !== undefined
+            && isWord(statement[i + 1], "in") && statement[i + 2]?.kind === "string"));
 }
 
 function isWord(token: Token, word: string): boolean {

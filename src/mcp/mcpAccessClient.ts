@@ -977,7 +977,7 @@ export class McpAccessClient {
         sql: string,
         isAllowed?: () => boolean
     ): Promise<AccessQueryPreview> {
-        await this.suppressAccessAlerts(connection);
+        await this.suppressAccessAlerts(connection, isAllowed);
         try {
             const payload = await this.callTool("execute_sql", {
                 db_path: connection.dbPath,
@@ -1193,13 +1193,16 @@ export class McpAccessClient {
      * Silencia los diálogos modales de Access (MsgBox, confirmaciones) para que
      * no bloqueen el servidor MCP. Se ignoran errores porque Access puede no estar abierto.
      */
-    private async suppressAccessAlerts(connection: AccessConnection): Promise<void> {
+    private async suppressAccessAlerts(connection: AccessConnection, isAllowed?: () => boolean): Promise<void> {
         try {
             await this.callTool("eval_vba", {
                 db_path: connection.dbPath,
                 expression: "Application.DisplayAlerts = False\nDoCmd.SetWarnings False"
-            }, 5000);
-        } catch {
+            }, 5000, { isAllowed });
+        } catch (error) {
+            if (error instanceof SqlDocumentDispatchBlockedError) {
+                throw error;
+            }
             // Non-fatal: Access may not be running interactively
         }
     }
