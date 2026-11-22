@@ -2,7 +2,7 @@
     "name": "access-explorer",
     "displayName": "%extension.displayName%",
     "description": "%extension.description%",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "publisher": "luna-soft",
     "author": {
         "name": "Juanjo Luna",
@@ -571,8 +571,8 @@
         "vscode:prepublish": "npm run compile",
         "test:smoke": "node ./scripts/smoke-release-checks.js",
         "test": "tsc -p tsconfig.test.json && node ./scripts/run-unit-tests.js",
-        "package:ci": "node -e \"require('node:fs').mkdirSync('.artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out .artifacts/access-explorer.vsix",
-        "release:preflight": "npm run compile && npm run test:smoke && npm run package:ci"
+        "package:ci": "node -e \"require('node:fs').mkdirSync('.artifacts',{recursive:true})\" && npx @vscode/vsce package --out .artifacts/access-explorer.vsix",
+        "release:preflight": "npm run compile && npm run test:smoke && npm run package:ci && node ./scripts/verify-vsix.js"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0"
@@ -580,6 +580,7 @@
     "devDependencies": {
         "@types/node": "^20.14.8",
         "@types/vscode": "^1.92.0",
-        "typescript": "^5.5.4"
+        "typescript": "^5.5.4",
+        "yauzl": "^3.4.0"
     }
 }
