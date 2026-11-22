@@ -4,6 +4,7 @@ src/**
 tsconfig.json
 tsconfig.test.json
 .test-build/**
+scripts/run-unit-tests.js
 **/*.map
 **/*.ts
 !dist/**

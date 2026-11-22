@@ -110,7 +110,7 @@ describe("AccessMetadataService", () => {
         source.suffix = "-new";
         const fresh = await service.getForms(connectionA);
         release();
-        await stale;
+        assert.deepEqual(await stale, [], "invalidated requests must not return stale metadata");
 
         assert.equal(fresh[0].name, "frmCustomers-new");
         assert.equal((await service.getForms(connectionA))[0].name, "frmCustomers-new");

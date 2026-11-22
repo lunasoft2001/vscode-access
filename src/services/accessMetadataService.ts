@@ -134,7 +134,7 @@ export class AccessMetadataService {
                 target.value = value;
                 target.pending = undefined;
                 target.failedAt = undefined;
-                return value;
+                return this.snapshots.get(connection.id) === snapshot ? value : [];
             },
             (error) => {
                 target.pending = undefined;

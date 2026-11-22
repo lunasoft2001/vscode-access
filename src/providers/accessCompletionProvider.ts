@@ -4,6 +4,7 @@ import type { AccessMetadataService } from "../services/accessMetadataService";
 import { getSqlCompletions, getVbaCompletions } from "../intellisense/completionCore";
 import type { CompletionEntry, CompletionEntryKind } from "../intellisense/completionCore";
 import { getLogicalLinePrefix } from "../intellisense/vbaRecognizer";
+import { normalizeDbPath } from "../services/connectionStore";
 
 export interface AccessCompletionOptions {
     metadata: AccessMetadataService;
@@ -18,6 +19,16 @@ const ITEM_KINDS: Record<CompletionEntryKind, vscode.CompletionItemKind> = {
     control: vscode.CompletionItemKind.Property,
     field: vscode.CompletionItemKind.Field
 };
+
+export function resolveSqlCompletionConnection(
+    bound: AccessConnection | undefined,
+    active: AccessConnection | undefined
+): AccessConnection | undefined {
+    return bound && active && bound.id === active.id
+        && normalizeDbPath(bound.dbPath) === normalizeDbPath(active.dbPath)
+        ? bound
+        : undefined;
+}
 
 export function registerAccessCompletionProviders(options: AccessCompletionOptions): vscode.Disposable {
     const vbaProvider: vscode.CompletionItemProvider = {
@@ -44,10 +55,16 @@ export function registerAccessCompletionProviders(options: AccessCompletionOptio
                 return undefined;
             }
 
+            const isCurrent = () => {
+                const current = options.resolveSqlConnection(document);
+                return current !== undefined && current.id === connection.id
+                    && normalizeDbPath(current.dbPath) === normalizeDbPath(connection.dbPath);
+            };
             return resolveEntries(
-                getSqlCompletions(options.metadata, connection, document.getText(), document.offsetAt(position)),
+                getSqlCompletions(options.metadata, connection, document.getText(), document.offsetAt(position), isCurrent),
                 position,
-                token
+                token,
+                isCurrent
             );
         }
     };
@@ -61,11 +78,12 @@ export function registerAccessCompletionProviders(options: AccessCompletionOptio
 async function resolveEntries(
     pending: Promise<CompletionEntry[]>,
     position: vscode.Position,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    isCurrent: () => boolean = () => true
 ): Promise<vscode.CompletionList | undefined> {
     // On cancellation the load keeps running in the metadata service and its result stays cached.
     const entries = await raceCancellation(pending, token);
-    if (!entries || entries.length === 0) {
+    if (!entries || entries.length === 0 || !isCurrent()) {
         return undefined;
     }
 

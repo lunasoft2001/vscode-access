@@ -174,7 +174,8 @@ const translations = {
         "tree.label.line": "line {0}",
         "tree.label.lines": "{0} lines",
         "tree.description.reference": "reference",
-        "intellisense.paused": "Access IntelliSense paused: Access is not on \"{0}\". Refresh or open an object from that database to resume."
+        "intellisense.paused": "Access IntelliSense paused: Access is not on \"{0}\". Refresh or open an object from that database to resume.",
+        "intellisense.sqlConnectionMismatch": "Access IntelliSense paused: select \"{0}\" as the SQL connection to match this document."
     },
     es: {
         "secondBrain.status.tooltip": "Estado de generacion de SecondBrain",
@@ -347,7 +348,8 @@ const translations = {
         "tree.label.line": "linea {0}",
         "tree.label.lines": "{0} lineas",
         "tree.description.reference": "referencia",
-        "intellisense.paused": "IntelliSense de Access en pausa: Access no esta en \"{0}\". Actualiza o abre un objeto de esa base de datos para reanudar."
+        "intellisense.paused": "IntelliSense de Access en pausa: Access no esta en \"{0}\". Actualiza o abre un objeto de esa base de datos para reanudar.",
+        "intellisense.sqlConnectionMismatch": "IntelliSense de Access en pausa: selecciona \"{0}\" como conexion SQL para que coincida con este documento."
     }
 } as const;
 
