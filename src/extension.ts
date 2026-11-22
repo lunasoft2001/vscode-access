@@ -163,8 +163,11 @@ export function activate(context: vscode.ExtensionContext): void {
         }
     }
 
-    function checkedQueryConnection(meta: AccessQueryMeta): import("./models/types").AccessConnection | undefined {
-        const check = checkSqlDocumentConnection(meta.connection, activeSqlConnection, connectionStore.getAll());
+    function checkedQueryConnection(
+        meta: AccessQueryMeta,
+        currentBound: import("./models/types").AccessConnection | null = meta.connection
+    ): import("./models/types").AccessConnection | undefined {
+        const check = checkSqlDocumentConnection(meta.connection, activeSqlConnection, connectionStore.getAll(), currentBound);
         if (check.kind === "missing") {
             void vscode.window.showErrorMessage(rt("sql.documentConnectionMissing", meta.connection.name));
             return undefined;
@@ -174,6 +177,18 @@ export function activate(context: vscode.ExtensionContext): void {
             return undefined;
         }
         return check.connection;
+    }
+
+    function queryDispatchGuard(document: vscode.TextDocument, connection: import("./models/types").AccessConnection): () => boolean {
+        const key = document.uri.toString();
+        const wasBound = queryDocuments.has(key);
+        return () => {
+            const current = queryDocuments.get(key);
+            const currentBound = document.isClosed || (wasBound && !current)
+                ? null
+                : current?.connection ?? connection;
+            return !!checkedQueryConnection({ connection }, currentBound);
+        };
     }
 
     function getActiveSqlMeta(editor: vscode.TextEditor | undefined): {
@@ -912,7 +927,7 @@ export function activate(context: vscode.ExtensionContext): void {
             return;
         }
 
-        const isAllowed = () => !!checkedQueryConnection({ connection });
+        const isAllowed = queryDispatchGuard(editor.document, connection);
         if (!isAllowed()) {
             return;
         }
@@ -2144,8 +2159,9 @@ render();
             bindScratchDocument(editor.document, connection);
             updateSqlStatusBar();
 
+            const isAllowed = queryDispatchGuard(editor.document, connection);
             try {
-                await runSqlAndShow(connection, sql, () => !!checkedQueryConnection({ connection }));
+                await runSqlAndShow(connection, sql, isAllowed);
             } catch (error) {
                 if (error instanceof SqlDocumentDispatchBlockedError) {
                     return;

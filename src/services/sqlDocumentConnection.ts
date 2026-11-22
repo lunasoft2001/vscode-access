@@ -9,14 +9,17 @@ type SqlDocumentConnectionCheck =
 export function checkSqlDocumentConnection(
     bound: AccessConnection,
     selected: AccessConnection | undefined,
-    connections: readonly AccessConnection[]
+    connections: readonly AccessConnection[],
+    currentBound: AccessConnection | null = bound
 ): SqlDocumentConnectionCheck {
     const stored = connections.find((item) => item.id === bound.id
         && normalizeDbPath(item.dbPath) === normalizeDbPath(bound.dbPath));
     if (!stored) {
         return { kind: "missing" };
     }
-    if (!selected || selected.id !== stored.id
+    if (!currentBound || currentBound.id !== stored.id
+        || normalizeDbPath(currentBound.dbPath) !== normalizeDbPath(stored.dbPath)
+        || !selected || selected.id !== stored.id
         || normalizeDbPath(selected.dbPath) !== normalizeDbPath(stored.dbPath)) {
         return { kind: "mismatch" };
     }

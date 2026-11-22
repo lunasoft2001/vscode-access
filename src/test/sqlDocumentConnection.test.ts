@@ -23,4 +23,12 @@ describe("SQL document connection safety", () => {
         assert.deepEqual(checkSqlDocumentConnection(a, a, [b]), { kind: "missing" });
         assert.deepEqual(checkSqlDocumentConnection(a, a, [{ ...a, dbPath: b.dbPath }]), { kind: "missing" });
     });
+
+    it("blocks a document rebound or closed before dispatch", () => {
+        assert.deepEqual(checkSqlDocumentConnection(a, a, [a, b], b), { kind: "mismatch" });
+        assert.deepEqual(checkSqlDocumentConnection(a, a, [a, b], null), { kind: "mismatch" });
+        assert.deepEqual(checkSqlDocumentConnection(a, a, [a, b], { ...a, dbPath: "c:/DB/a.accdb" }), {
+            kind: "ready", connection: a
+        });
+    });
 });
