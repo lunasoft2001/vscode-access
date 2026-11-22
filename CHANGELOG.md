@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.3.0 - 2026-11-22
+- **Database-aware IntelliSense**: Suggests forms and their controls in VBA, and table fields for SQL aliases in supported SELECT queries.
+- **Connection safety**: Pauses SQL suggestions when the document and selected SQL connection differ, and discards invalidated metadata.
+- **Workspace configuration**: Removes machine-specific MCP paths so the managed runtime can be used.
+
 ## 1.2.0 - 2026-06-26
 - **Marketplace docs overhaul**: Reworked README content for clearer onboarding and discoverability (value proposition, 30-second start, common workflows, command cheat sheet).
 - **MCP parity improvements**: Added extension support for SQL batch execution flow and data transfer operations (CSV/XLSX import/export).

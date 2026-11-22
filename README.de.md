@@ -178,6 +178,7 @@ In Access-Dokumenten schlägt IntelliSense nach `Forms!` Formulare, nach `Forms!
 Dieses README enthält jetzt eine kurze Zusammenfassung der Änderungen pro Version.
 Für alle Details siehe [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.3.0**: Datenbankbezogenes IntelliSense für VBA-Formulare und Steuerelemente sowie SQL-Tabellenfelder, mit Schutz bei unterschiedlichen Verbindungen.
 - **v1.2.0**: Umfassende Überarbeitung der Marketplace-Dokumentation und klareres Onboarding (Was Du machen kannst, 30-Sekunden-Start, Workflows, Befehlsübersicht). Bessere Sichtbarkeit neuer Funktionen wie SQL-Batch-Ausführung, CSV/XLSX-Datenübertragung und Verwendungen suchen.
 - **v1.1.4**: MCP-Versionserkennung verbessert — extrahiert jetzt die Version aus Commit-Nachrichten, wenn Git-Tags nicht verfügbar sind (z. B. "v0.7.43"), wodurch Benutzer bessere Sichtbarkeit des MCP-Builds erhalten.
 - **v1.1.3**: Marketplace-Release-Bump für die neuesten Access Explorer-Fixes.
@@ -193,6 +194,8 @@ Ab den nächsten Versionen wird dieser Abschnitt bei jedem Release aktualisiert 
 ## Danksagungen
 
 **Access Explorer** wurde entwickelt von [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
+
+Danke an [Sachin (@asachin96)](https://github.com/asachin96) für den Proof of Concept des datenbankbezogenen IntelliSense.
 
 Diese Erweiterung verwendet **[MCP-Access](https://github.com/unmateria/MCP-Access)** als Backend-Server zur Kommunikation mit Microsoft Access.  
 MCP-Access ist ein unabhängiges Projekt unter eigener Lizenz. Alle Rechte liegen bei den jeweiligen Autoren.

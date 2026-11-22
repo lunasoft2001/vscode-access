@@ -178,6 +178,7 @@ En documentos de Access, IntelliSense sugiere formularios tras `Forms!`, control
 Este README incluye ahora un resumen corto de cambios por versión.
 Para el detalle completo, consulta [CHANGELOG.md](CHANGELOG.md).
 
+- **v1.3.0**: IntelliSense conectado a la base para formularios y controles VBA y campos de tablas SQL, con protección ante conexiones distintas.
 - **v1.2.0**: Revisión completa de la documentación de Marketplace y onboarding más claro (Qué Puedes Hacer, guía en 30 segundos, flujos y tabla de comandos). Mejora la visibilidad de funciones como ejecución SQL en lote, transferencia CSV/XLSX y Buscar usos.
 - **v1.1.4**: Detección de versión MCP mejorada — ahora extrae la versión de los mensajes de commit cuando no hay tags de Git (p. ej., "v0.7.43"), dando a los usuarios mejor visibilidad del build de MCP.
 - **v1.1.3**: Marketplace release bump para publicar los últimos fixes de Access Explorer.
@@ -194,6 +195,8 @@ A partir de las próximas versiones, esta sección se actualizará en cada relea
 ## Créditos
 
 **Access Explorer** es una extensión desarrollada por [Juanjo Luna](https://blog.luna-soft.es/) — [luna-soft](https://blog.luna-soft.es/).
+
+Gracias a [Sachin (@asachin96)](https://github.com/asachin96) por la prueba de concepto de IntelliSense conectado a la base de datos.
 
 Esta extensión utiliza **[MCP-Access](https://github.com/unmateria/MCP-Access)** como servidor backend para comunicarse con Microsoft Access.  
 MCP-Access es un proyecto independiente distribuido bajo su propia licencia. Todos los derechos sobre MCP-Access pertenecen a sus respectivos autores.
