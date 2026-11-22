@@ -63,6 +63,16 @@ describe("managed MCP version", () => {
         }
     });
 
+    it("does not read an array-table version as the project version", async () => {
+        const { root, repo, client } = await fixture();
+        try {
+            await fs.writeFile(path.join(repo, "pyproject.toml"), '[project]\ndynamic = ["version"]\n[[tool.example]]\nversion = "1.0.0"\n');
+            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "desconocida (instalado por ZIP)");
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
     it("prefers package metadata over an older Git tag and uses the commit when no exact tag exists", async () => {
         const { root, repo, client } = await fixture();
         try {

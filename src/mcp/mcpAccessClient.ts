@@ -388,6 +388,9 @@ export class McpAccessClient {
         }
         let inProject = false;
         for (const line of content.split(/\r?\n/)) {
+            if (inProject && /^\s*\[\[/.test(line)) {
+                break;
+            }
             const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
             if (section) {
                 if (inProject) {
