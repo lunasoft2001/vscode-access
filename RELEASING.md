@@ -7,6 +7,8 @@ This project uses a two-layer release flow:
 
 ## 1) Local preflight
 
+Use Node.js 22 or later to build and package from source.
+
 Run before opening a release PR or pushing a version bump:
 
 ```powershell
