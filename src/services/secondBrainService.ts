@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { AccessCategoryKey, AccessConnection, AccessControlInfo, AccessObjectInfo, AccessPropertyInfo } from "../models/types";
 import { McpAccessClient } from "../mcp/mcpAccessClient";
 import { isAccessDatabaseOpenError, restartAccessProcesses } from "../utils/accessRecovery";
+import { rt } from "../utils/runtimeL10n";
 
 export type SecondBrainScope =
     | { mode: "full" }
@@ -40,6 +41,7 @@ export interface SecondBrainExportResult {
 export interface SecondBrainProgressEvent {
     phase: "inventory" | "object" | "write" | "done";
     message: string;
+    displayMessage?: string;
     completed?: number;
     total?: number;
 }
@@ -87,14 +89,16 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "inventory",
-            message: `Preparando exportacion en ${rootDir}`
+            message: `Preparando exportacion en ${rootDir}`,
+            displayMessage: rt("sb.prepareExport", rootDir)
         });
 
         const metadataStartedAt = Date.now();
         const metadata = await this.buildMetadata(connection, scope, options);
         await this.reportProgress(options, {
             phase: "inventory",
-            message: `Metadata lista en ${formatDuration(Date.now() - metadataStartedAt)}`
+            message: `Metadata lista en ${formatDuration(Date.now() - metadataStartedAt)}`,
+            displayMessage: rt("sb.metadataReady", formatDuration(Date.now() - metadataStartedAt))
         });
 
         const metadataPath = path.join(rootDir, "metadata.json");
@@ -103,7 +107,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: `metadata.json escrito en ${formatDuration(Date.now() - metadataWriteStartedAt)}`
+            message: `metadata.json escrito en ${formatDuration(Date.now() - metadataWriteStartedAt)}`,
+            displayMessage: rt("sb.fileWritten", "metadata.json", formatDuration(Date.now() - metadataWriteStartedAt))
         });
 
         const vaultStartedAt = Date.now();
@@ -111,12 +116,14 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: `Vault generado en ${formatDuration(Date.now() - vaultStartedAt)}`
+            message: `Vault generado en ${formatDuration(Date.now() - vaultStartedAt)}`,
+            displayMessage: rt("sb.vaultGenerated", formatDuration(Date.now() - vaultStartedAt))
         });
 
         await this.reportProgress(options, {
             phase: "done",
-            message: `SecondBrain generado correctamente en ${formatDuration(Date.now() - exportStartedAt)}`
+            message: `SecondBrain generado correctamente en ${formatDuration(Date.now() - exportStartedAt)}`,
+            displayMessage: rt("sb.done", formatDuration(Date.now() - exportStartedAt))
         });
 
         return {
@@ -205,7 +212,7 @@ export class SecondBrainService {
             // Pre-fetch object lists to compute global total for progress bar
             const toolCategoriesToPreload: AccessCategoryKey[] = ["tables", "queries", "forms", "reports", "macros", "modules"];
             const preloadedLists = new Map<AccessCategoryKey, import("../models/types").AccessObjectInfo[]>();
-            await this.reportProgress(options, { phase: "inventory", message: "Preparando inventario de objetos..." });
+            await this.reportProgress(options, { phase: "inventory", message: "Preparando inventario de objetos...", displayMessage: rt("sb.prepareInventory") });
             for (const cat of toolCategoriesToPreload) {
                 const toolType = toolTypeForCategory(cat);
                 if (toolType) {
@@ -257,7 +264,8 @@ export class SecondBrainService {
         if (categoryKey === "relationships") {
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: "Cargando relaciones"
+                message: "Cargando relaciones",
+                displayMessage: rt("sb.relationships")
             });
             const relationships = await this.mcpClient.listRelationships(connection, SecondBrainService.INVENTORY_TIMEOUT_MS);
             for (const rel of relationships) {
@@ -269,7 +277,8 @@ export class SecondBrainService {
         if (categoryKey === "references") {
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: "Cargando referencias VBA"
+                message: "Cargando referencias VBA",
+                displayMessage: rt("sb.references")
             });
             const references = await this.mcpClient.listReferences(connection, SecondBrainService.INVENTORY_TIMEOUT_MS);
             for (const ref of references) {
@@ -285,7 +294,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "inventory",
-            message: `Listando ${categoryKey}`
+            message: `Listando ${categoryKey}`,
+            displayMessage: rt("sb.listing", categoryKey)
         });
         const objects = preloadedObjects ?? await this.mcpClient.listObjects(connection, toolType, SecondBrainService.INVENTORY_TIMEOUT_MS);
         const total = objects.length;
@@ -324,7 +334,8 @@ export class SecondBrainService {
                 if (objectDurationMs >= SecondBrainService.SLOW_OBJECT_WARNING_MS) {
                     await this.reportProgress(options, {
                         phase: "inventory",
-                        message: `${categoryKey}: ${objectInfo.name} completado en ${formatDuration(objectDurationMs)} (${completed}/${total})`
+                        message: `${categoryKey}: ${objectInfo.name} completado en ${formatDuration(objectDurationMs)} (${completed}/${total})`,
+                        displayMessage: rt("sb.completed", categoryKey, objectInfo.name, formatDuration(objectDurationMs), completed, total)
                     });
                 }
             } catch (firstError) {
@@ -336,7 +347,8 @@ export class SecondBrainService {
                     accessRestartedForCategory = true;
                     await this.reportProgress(options, {
                         phase: "inventory",
-                        message: `Access está abierto. Cerrándolo y reintentando ${categoryKey}:${objectInfo.name}...`
+                        message: `Access está abierto. Cerrándolo y reintentando ${categoryKey}:${objectInfo.name}...`,
+                        displayMessage: rt("sb.restart", categoryKey, objectInfo.name)
                     });
                     try {
                         await restartAccessProcesses();
@@ -348,7 +360,8 @@ export class SecondBrainService {
                         consecutiveFailures = 0;
                         await this.reportProgress(options, {
                             phase: "inventory",
-                            message: `${categoryKey}: ${objectInfo.name} exportado correctamente tras reiniciar Access.`
+                            message: `${categoryKey}: ${objectInfo.name} exportado correctamente tras reiniciar Access.`,
+                            displayMessage: rt("sb.restarted", categoryKey, objectInfo.name)
                         });
                         stopSlowObjectWarnings();
                         continue;
@@ -367,7 +380,8 @@ export class SecondBrainService {
                 metadata.warnings.push(`No se pudo exportar ${categoryKey}:${objectInfo.name} -> ${message}`);
                 await this.reportProgress(options, {
                     phase: "inventory",
-                    message: `${categoryKey}: ${objectInfo.name} fallo tras ${formatDuration(Date.now() - objectStartedAt)} -> ${message}`
+                    message: `${categoryKey}: ${objectInfo.name} fallo tras ${formatDuration(Date.now() - objectStartedAt)} -> ${message}`,
+                    displayMessage: rt("sb.failed", categoryKey, objectInfo.name, formatDuration(Date.now() - objectStartedAt), message)
                 });
 
                 consecutiveFailures += 1;
@@ -377,7 +391,10 @@ export class SecondBrainService {
                     const remaining = total - completed;
                     const summary = `${categoryKey}: abortando ${remaining} objetos restantes tras ${MAX_CONSECUTIVE_FAILURES} fallos consecutivos -> ${lastFailureMessage}`;
                     metadata.warnings.push(summary);
-                    await this.reportProgress(options, { phase: "inventory", message: summary });
+                    await this.reportProgress(options, {
+                        phase: "inventory", message: summary,
+                        displayMessage: rt("sb.abort", categoryKey, remaining, MAX_CONSECUTIVE_FAILURES, lastFailureMessage)
+                    });
                     await this.recoverAfterTimeout(options, `${categoryKey}:aborto-por-fallos-consecutivos`, metadata);
                     break;
                 }
@@ -387,7 +404,8 @@ export class SecondBrainService {
                         this.timeoutDegradedMode = true;
                         await this.reportProgress(options, {
                             phase: "inventory",
-                            message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`
+                            message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${categoryKey}:${objectInfo.name}.`,
+                            displayMessage: rt("sb.degraded", SecondBrainService.DEGRADED_TIMEOUT_MS, `${categoryKey}:${objectInfo.name}`)
                         });
                     }
                     // Reconectar siempre tras un timeout que llega aqui: runWithTimeoutRetry
@@ -423,7 +441,8 @@ export class SecondBrainService {
                 warningCount += 1;
                 void this.reportProgress(options, {
                     phase: "inventory",
-                    message: `${categoryKey}: ${objectName} sigue en curso tras ${formatDuration(Date.now() - startedAt)} (${completed}/${total}, aviso ${warningCount})`
+                    message: `${categoryKey}: ${objectName} sigue en curso tras ${formatDuration(Date.now() - startedAt)} (${completed}/${total}, aviso ${warningCount})`,
+                    displayMessage: rt("sb.slow", categoryKey, objectName, formatDuration(Date.now() - startedAt), completed, total, warningCount)
                 });
 
                 schedule(SecondBrainService.SLOW_OBJECT_REPEAT_MS);
@@ -447,14 +466,16 @@ export class SecondBrainService {
     ): Promise<void> {
         await this.reportProgress(options, {
             phase: "inventory",
-            message: `Timeout en ${contextLabel}. Reconectando MCP antes de continuar.`
+            message: `Timeout en ${contextLabel}. Reconectando MCP antes de continuar.`,
+            displayMessage: rt("sb.timeout", contextLabel)
         });
 
         try {
             await this.mcpClient.reconnect();
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: `MCP reconectado tras timeout en ${contextLabel}`
+                message: `MCP reconectado tras timeout en ${contextLabel}`,
+                displayMessage: rt("sb.reconnected", contextLabel)
             });
         } catch (reconnectError) {
             const reconnectMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
@@ -482,14 +503,16 @@ export class SecondBrainService {
                     this.timeoutDegradedMode = true;
                     await this.reportProgress(options, {
                         phase: "inventory",
-                        message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${contextLabel}.`
+                        message: `Modo timeout agresivo activado (${SecondBrainService.DEGRADED_TIMEOUT_MS} ms) tras timeout en ${contextLabel}.`,
+                        displayMessage: rt("sb.degraded", SecondBrainService.DEGRADED_TIMEOUT_MS, contextLabel)
                     });
                 }
 
                 attempt += 1;
                 await this.reportProgress(options, {
                     phase: "inventory",
-                    message: `Timeout en ${contextLabel}. Reintentando (${attempt}/${SecondBrainService.MCP_TIMEOUT_RETRIES}) tras reconexion MCP.`
+                    message: `Timeout en ${contextLabel}. Reintentando (${attempt}/${SecondBrainService.MCP_TIMEOUT_RETRIES}) tras reconexion MCP.`,
+                    displayMessage: rt("sb.retry", contextLabel, attempt, SecondBrainService.MCP_TIMEOUT_RETRIES)
                 });
                 await this.recoverAfterTimeout(options, contextLabel, metadata);
             }
@@ -597,7 +620,8 @@ export class SecondBrainService {
 
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: `${categoryKey}: ${objectName} -> controles`
+                message: `${categoryKey}: ${objectName} -> controles`,
+                displayMessage: rt("sb.controls", categoryKey, objectName)
             });
             try {
                 controls = await this.runWithTimeoutRetry(
@@ -618,7 +642,8 @@ export class SecondBrainService {
 
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: `${categoryKey}: ${objectName} -> propiedades`
+                message: `${categoryKey}: ${objectName} -> propiedades`,
+                displayMessage: rt("sb.properties", categoryKey, objectName)
             });
             try {
                 properties = await this.runWithTimeoutRetry(
@@ -641,7 +666,8 @@ export class SecondBrainService {
 
             await this.reportProgress(options, {
                 phase: "inventory",
-                message: `${categoryKey}: ${objectName} -> codigo`
+                message: `${categoryKey}: ${objectName} -> codigo`,
+                displayMessage: rt("sb.code", categoryKey, objectName)
             });
             try {
                 const doc = await this.runWithTimeoutRetry(
@@ -736,7 +762,8 @@ export class SecondBrainService {
     ): Promise<void> {
         await this.reportProgress(options, {
             phase: "inventory",
-            message: "Cargando tablas vinculadas"
+            message: "Cargando tablas vinculadas",
+            displayMessage: rt("sb.linkedTables")
         });
         const linkedTables = await this.mcpClient.listLinkedTables(connection, SecondBrainService.INVENTORY_TIMEOUT_MS);
         for (const linked of linkedTables) {
@@ -751,7 +778,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "inventory",
-            message: "Cargando opciones de inicio"
+            message: "Cargando opciones de inicio",
+            displayMessage: rt("sb.startup")
         });
         const startupOptions = await this.mcpClient.listStartupOptions(connection, SecondBrainService.INVENTORY_TIMEOUT_MS);
         for (const option of startupOptions) {
@@ -811,7 +839,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: "Escribiendo notas del vault"
+            message: "Escribiendo notas del vault",
+            displayMessage: rt("sb.writingNotes")
         });
 
         const indexingStartedAt = Date.now();
@@ -965,7 +994,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: `Indices del vault listos en ${formatDuration(Date.now() - indexingStartedAt)}`
+            message: `Indices del vault listos en ${formatDuration(Date.now() - indexingStartedAt)}`,
+            displayMessage: rt("sb.indexReady", formatDuration(Date.now() - indexingStartedAt))
         });
 
         for (const table of metadata.tables) {
@@ -1920,14 +1950,16 @@ export class SecondBrainService {
         await fs.writeFile(path.join(vaultDir, "ai-index.json"), JSON.stringify(aiIndex, null, 2), "utf-8");
         await this.reportProgress(options, {
             phase: "write",
-            message: `ai-index.json escrito en ${formatDuration(Date.now() - aiIndexStartedAt)}`
+            message: `ai-index.json escrito en ${formatDuration(Date.now() - aiIndexStartedAt)}`,
+            displayMessage: rt("sb.fileWritten", "ai-index.json", formatDuration(Date.now() - aiIndexStartedAt))
         });
 
         const bodyWriteStartedAt = Date.now();
         await Promise.all(bodyWrites);
         await this.reportProgress(options, {
             phase: "write",
-            message: `Cuerpos de notas escritos (${noteDrafts.size}) en ${formatDuration(Date.now() - bodyWriteStartedAt)}`
+            message: `Cuerpos de notas escritos (${noteDrafts.size}) en ${formatDuration(Date.now() - bodyWriteStartedAt)}`,
+            displayMessage: rt("sb.bodiesWritten", noteDrafts.size, formatDuration(Date.now() - bodyWriteStartedAt))
         });
 
         const backlinksStartedAt = Date.now();
@@ -1943,7 +1975,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: `Backlinks calculados en ${formatDuration(Date.now() - backlinksStartedAt)}`
+            message: `Backlinks calculados en ${formatDuration(Date.now() - backlinksStartedAt)}`,
+            displayMessage: rt("sb.backlinks", formatDuration(Date.now() - backlinksStartedAt))
         });
 
         const linksWriteStartedAt = Date.now();
@@ -1968,7 +2001,8 @@ export class SecondBrainService {
 
         await this.reportProgress(options, {
             phase: "write",
-            message: `Secciones de enlaces escritas en ${formatDuration(Date.now() - linksWriteStartedAt)}; total vault ${formatDuration(Date.now() - vaultStartedAt)}`
+            message: `Secciones de enlaces escritas en ${formatDuration(Date.now() - linksWriteStartedAt)}; total vault ${formatDuration(Date.now() - vaultStartedAt)}`,
+            displayMessage: rt("sb.linksWritten", formatDuration(Date.now() - linksWriteStartedAt), formatDuration(Date.now() - vaultStartedAt))
         });
     }
 

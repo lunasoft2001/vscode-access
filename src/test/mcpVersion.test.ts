@@ -57,7 +57,7 @@ describe("managed MCP version", () => {
         try {
             await fs.writeFile(path.join(repo, "README.md"), "### v0.7.51\n");
             await fs.writeFile(path.join(repo, "pyproject.toml"), '[tool.example]\nversion = "1.0.0"\n[project]\nname = "mcp"\n');
-            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "desconocida (instalado por ZIP)");
+            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "unknown (installed from ZIP)");
         } finally {
             await fs.rm(root, { recursive: true, force: true });
         }
@@ -67,7 +67,7 @@ describe("managed MCP version", () => {
         const { root, repo, client } = await fixture();
         try {
             await fs.writeFile(path.join(repo, "pyproject.toml"), '[project]\ndynamic = ["version"]\n[[tool.example]]\nversion = "1.0.0"\n');
-            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "desconocida (instalado por ZIP)");
+            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "unknown (installed from ZIP)");
         } finally {
             await fs.rm(root, { recursive: true, force: true });
         }
@@ -100,7 +100,7 @@ describe("managed MCP version", () => {
         try {
             output.length = 0;
             await fs.mkdir(path.join(repo, "pyproject.toml"));
-            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "desconocida (instalado por ZIP)");
+            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "unknown (installed from ZIP)");
             assert.ok(output.some((line) => line.includes("Could not read MCP package metadata")));
         } finally {
             await fs.rm(root, { recursive: true, force: true });
