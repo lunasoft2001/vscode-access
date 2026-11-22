@@ -206,18 +206,18 @@ export class McpAccessClient {
             };
         }
 
+        const packageVersion = this.tryReadMcpPackageVersion(repoDir);
         const hasGitMetadata = fs.existsSync(path.join(repoDir, ".git"));
         if (!hasGitMetadata) {
-            const zipVersion = this.tryExtractMcpVersionFromFiles(repoDir);
             return {
-                version: zipVersion || "desconocida (instalado por ZIP)",
+                version: packageVersion || "desconocida (instalado por ZIP)",
                 commit: "n/a",
                 originUrl: MCP_ACCESS_ARCHIVE_URL
             };
         }
 
         const [tagResult, commitResult, logResult, originResult] = await Promise.all([
-            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--abbrev=0"], undefined, true),
+            this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--exact-match", "HEAD"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "log", "-1", "--format=%s"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
@@ -225,7 +225,9 @@ export class McpAccessClient {
 
         // Try to extract version from commit message (e.g., "v0.7.43: wedged-session detection")
         let version = "sin tag";
-        if (tagResult.exitCode === 0) {
+        if (packageVersion) {
+            version = packageVersion;
+        } else if (tagResult.exitCode === 0) {
             version = tagResult.stdout || "sin tag";
         } else if (logResult.exitCode === 0) {
             const commitMsg = logResult.stdout || "";
@@ -379,34 +381,28 @@ export class McpAccessClient {
         return this.getMcpRuntimeInfo();
     }
 
-    private tryExtractMcpVersionFromFiles(repoDir: string): string | undefined {
-        const candidateFiles = [
-            path.join(repoDir, "README.md"),
-            path.join(repoDir, "readme.md"),
-            path.join(repoDir, "CLAUDE.md")
-        ];
-
-        for (const filePath of candidateFiles) {
-            if (!fs.existsSync(filePath)) {
-                continue;
-            }
-
-            try {
-                const content = fs.readFileSync(filePath, "utf8");
-                const changelogVersionMatch = content.match(/###\s+(v\d+\.\d+\.\d+)\b/i);
-                if (changelogVersionMatch?.[1]) {
-                    return changelogVersionMatch[1];
-                }
-
-                const genericVersionMatch = content.match(/\b(v\d+\.\d+\.\d+)\b/i);
-                if (genericVersionMatch?.[1]) {
-                    return genericVersionMatch[1];
-                }
-            } catch {
-                // ignore unreadable files and try next candidate
-            }
+    private tryReadMcpPackageVersion(repoDir: string): string | undefined {
+        const filePath = path.join(repoDir, "pyproject.toml");
+        if (!fs.existsSync(filePath)) {
+            return undefined;
         }
 
+        const content = fs.readFileSync(filePath, "utf8");
+        let inProject = false;
+        for (const line of content.split(/\r?\n/)) {
+            const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+            if (section) {
+                if (inProject) {
+                    break;
+                }
+                inProject = section[1] === "project";
+            } else if (inProject) {
+                const version = line.match(/^\s*version\s*=\s*["'](\d+\.\d+\.\d+)["']\s*(?:#.*)?$/)?.[1];
+                if (version) {
+                    return `v${version}`;
+                }
+            }
+        }
         return undefined;
     }
 
