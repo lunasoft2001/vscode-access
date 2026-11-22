@@ -51,7 +51,7 @@ nodeModule._load = function (this: unknown, request: string, ...rest: unknown[])
     return request === "vscode" ? fakeVscode : originalLoad.call(this, request, ...rest);
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { registerAccessCompletionProviders } = require("../providers/accessCompletionProvider") as typeof import("../providers/accessCompletionProvider");
+const { registerAccessCompletionProviders, resolveSqlCompletionConnection } = require("../providers/accessCompletionProvider") as typeof import("../providers/accessCompletionProvider");
 nodeModule._load = originalLoad;
 
 const connection: AccessConnection = { id: "a", name: "Sales", dbPath: "C:\\db\\sales.accdb" };
@@ -65,11 +65,12 @@ function createDocument(text: string) {
     } as any;
 }
 
-function setup(bound: boolean) {
+function setup(bound: boolean, options?: { resolveSqlConnection?: () => AccessConnection | undefined; gate?: Promise<void> }) {
     const calls: string[] = [];
     const service = new AccessMetadataService({
         async listObjects(_c, type) {
             calls.push(`list:${type}`);
+            await options?.gate;
             return (type === "form" ? ["frmCustomers"] : ["Orders"]).map((name) => ({ name } as AccessObjectInfo));
         },
         async getControls() {
@@ -85,7 +86,7 @@ function setup(bound: boolean) {
     registerAccessCompletionProviders({
         metadata: service,
         resolveVbaConnection: () => (bound ? connection : undefined),
-        resolveSqlConnection: () => (bound ? connection : undefined)
+        resolveSqlConnection: options?.resolveSqlConnection ?? (() => (bound ? connection : undefined))
     });
     const find = (language: string) => registrations.find((r) => r.selector.language === language)!;
     return { calls, vba: find("vb"), sql: find("sql") };
@@ -128,6 +129,32 @@ describe("access completion providers", () => {
 
         assert.deepEqual(result.items.map((item: CompletionItem) => item.label), ["OrderID"]);
         assert.equal(result.items[0].detail, "LONG");
+    });
+
+    it("only resolves SQL completion when the document and execution connections match", () => {
+        const other = { ...connection, id: "b", dbPath: "C:\\db\\other.accdb" };
+        assert.equal(resolveSqlCompletionConnection(connection, connection), connection);
+        assert.equal(resolveSqlCompletionConnection(connection, { ...connection, dbPath: "c:/DB/sales.accdb" }), connection);
+        assert.equal(resolveSqlCompletionConnection(connection, other), undefined);
+        assert.equal(resolveSqlCompletionConnection(connection, { ...connection, dbPath: other.dbPath }), undefined);
+        assert.equal(resolveSqlCompletionConnection(connection, undefined), undefined);
+    });
+
+    it("discards SQL completions if the selected connection changes during loading", async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let selected: AccessConnection | undefined = connection;
+        const { sql, calls } = setup(true, {
+            gate,
+            resolveSqlConnection: () => resolveSqlCompletionConnection(connection, selected)
+        });
+        const pending = sql.provider.provideCompletionItems(
+            createDocument("SELECT o.\nFROM Orders o"), new Position(0, 9), liveToken
+        );
+        selected = { ...connection, id: "b", dbPath: "C:\\db\\other.accdb" };
+        release();
+        assert.equal(await pending, undefined);
+        assert.deepEqual(calls, ["list:table"], "must not request fields for the previous connection");
     });
 
     it("returns nothing when the request was cancelled", async () => {

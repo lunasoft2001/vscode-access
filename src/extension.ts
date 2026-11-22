@@ -7,7 +7,7 @@ import { ACCESS_CATEGORIES } from "./models/types";
 import { AccessTreeProvider } from "./providers/accessTreeProvider";
 import { ConnectionStore, normalizeDbPath } from "./services/connectionStore";
 import { AccessMetadataService } from "./services/accessMetadataService";
-import { registerAccessCompletionProviders } from "./providers/accessCompletionProvider";
+import { registerAccessCompletionProviders, resolveSqlCompletionConnection } from "./providers/accessCompletionProvider";
 import { SecondBrainService } from "./services/secondBrainService";
 import { BulkExportService } from "./services/bulkExportService";
 import { ExportObjectsService } from "./services/exportObjectsService";
@@ -62,7 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    context.subscriptions.push(mcpClient);
+    let activeSqlConnection: import("./models/types").AccessConnection | undefined;
 
     // Database-aware completion (VBA "Forms!" / SQL "alias."): read-only, cached metadata, Access documents only.
     const intellisenseOutput = vscode.window.createOutputChannel("Access Explorer IntelliSense");
@@ -86,7 +86,14 @@ export function activate(context: vscode.ExtensionContext): void {
         registerAccessCompletionProviders({
             metadata: metadataService,
             resolveVbaConnection: (document) => resolveBoundConnection(codeDocuments.get(document.uri.toString())),
-            resolveSqlConnection: (document) => resolveBoundConnection(queryDocuments.get(document.uri.toString()))
+            resolveSqlConnection: (document) => {
+                const bound = resolveBoundConnection(queryDocuments.get(document.uri.toString()));
+                const connection = resolveSqlCompletionConnection(bound, activeSqlConnection);
+                if (bound && !connection) {
+                    vscode.window.setStatusBarMessage(rt("intellisense.sqlConnectionMismatch", bound.name), 6000);
+                }
+                return connection;
+            }
         }),
         // Any tree refresh (manual, reconnect, database switch, edit through Explorer) or MCP disconnect drops the snapshot.
         treeProvider.onDidChangeTreeData(() => metadataService.invalidateAll()),
@@ -94,7 +101,6 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     // Status bar item: shows the active connection for the SQL editor
-    let activeSqlConnection: import("./models/types").AccessConnection | undefined;
     const sqlStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     sqlStatusBar.command = "accessExplorer.pickSqlConnection";
     sqlStatusBar.tooltip = rt("sql.status.tooltip");

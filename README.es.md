@@ -144,6 +144,8 @@ Una vez instalada, los siguientes ajustes están disponibles en **Ajustes** de V
 3. Guarda con **Access: Guardar código en Access**.
 4. Compila con **Access: Compilar módulo** o **Access: Compilar VBA**.
 
+En documentos de Access, IntelliSense sugiere formularios tras `Forms!`, controles tras `Forms!NombreFormulario!` y campos de tabla tras un alias SQL como `o.` en consultas SELECT compatibles. Las sugerencias SQL se pausan si la conexión del documento no coincide con la conexión SQL seleccionada; selecciona la conexión del documento para reanudarlas. La carga de metadatos puede requerir que Access esté en la misma base de datos.
+
 ### 3) Migración de datos con CSV/XLSX
 
 1. Ejecuta **Access: Importar/Exportar datos**.

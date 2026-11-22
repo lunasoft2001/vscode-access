@@ -62,7 +62,8 @@ export async function getSqlCompletions(
     metadata: MetadataReader,
     connection: AccessConnection,
     text: string,
-    offset: number
+    offset: number,
+    isCurrent: () => boolean = () => true
 ): Promise<CompletionEntry[]> {
     const context = resolveSqlQualifier(text, offset);
     if (!context) {
@@ -70,7 +71,7 @@ export async function getSqlCompletions(
     }
 
     const table = (await metadata.getTables(connection)).find((item) => sameName(item.name, context.source));
-    if (!table) {
+    if (!table || !isCurrent()) {
         return [];
     }
 
