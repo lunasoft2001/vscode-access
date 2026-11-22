@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CategoryNode, DetailNode, ObjectNode } from "./models/treeNodes";
-import { McpAccessClient } from "./mcp/mcpAccessClient";
+import { McpAccessClient, SqlDocumentDispatchBlockedError } from "./mcp/mcpAccessClient";
 import { ACCESS_CATEGORIES } from "./models/types";
 import { AccessTreeProvider } from "./providers/accessTreeProvider";
 import { ConnectionStore, normalizeDbPath } from "./services/connectionStore";
@@ -912,8 +912,8 @@ export function activate(context: vscode.ExtensionContext): void {
             return;
         }
 
-        const currentMeta = queryDocuments.get(editor.document.uri.toString());
-        if (currentMeta && !checkedQueryConnection(currentMeta)) {
+        const isAllowed = () => !!checkedQueryConnection({ connection });
+        if (!isAllowed()) {
             return;
         }
 
@@ -940,7 +940,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 title: `Guardando consulta ${finalQueryName}...`,
                 cancellable: false
             },
-            () => mcpClient.evalVba(connection, expression, 30000)
+            () => mcpClient.evalVba(connection, expression, 30000, isAllowed)
         );
 
         trackQueryDocument(editor.document, {
@@ -1784,7 +1784,8 @@ render();
                         sql: statement,
                         label: `sql_${index + 1}`
                     })),
-                    true
+                    true,
+                    isAllowed
                 )
             );
 
@@ -1838,7 +1839,7 @@ render();
             }
             const result = await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `Ejecutando ${verb}...`, cancellable: false },
-                () => mcpClient.executeDml(connection, trimmed)
+                () => mcpClient.executeDml(connection, trimmed, isAllowed)
             );
 
             const affected = result.rowsAffected;
@@ -1871,7 +1872,7 @@ render();
         }
         const preview = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: rt("sql.executing"), cancellable: false },
-            () => mcpClient.executeRawSqlQuery(connection, trimmed)
+            () => mcpClient.executeRawSqlQuery(connection, trimmed, 500, isAllowed)
         );
         showResultsWebview(preview.sql, connection.name, preview.rows, preview.rowCount);
     }
@@ -2143,10 +2144,12 @@ render();
             bindScratchDocument(editor.document, connection);
             updateSqlStatusBar();
 
-            const boundMeta = queryDocuments.get(editor.document.uri.toString());
             try {
-                await runSqlAndShow(connection, sql, () => !boundMeta || !!checkedQueryConnection(boundMeta));
+                await runSqlAndShow(connection, sql, () => !!checkedQueryConnection({ connection }));
             } catch (error) {
+                if (error instanceof SqlDocumentDispatchBlockedError) {
+                    return;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error ejecutando SQL: ${message}`);
             }
@@ -2323,6 +2326,9 @@ render();
                     : undefined;
                 await saveQueryDocumentToAccess(editor, explicitQueryName);
             } catch (error) {
+                if (error instanceof SqlDocumentDispatchBlockedError) {
+                    return;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error al guardar la consulta: ${message}`);
             }
