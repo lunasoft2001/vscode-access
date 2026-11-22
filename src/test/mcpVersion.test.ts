@@ -4,10 +4,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+const output: string[] = [];
 const fakeVscode = {
     env: { language: "en" },
     EventEmitter: class { event = () => {}; dispose() {} },
-    window: { createOutputChannel: () => ({ appendLine() {}, dispose() {} }) }
+    window: { createOutputChannel: () => ({ appendLine(line: string) { output.push(line); }, dispose() {} }) }
 };
 const nodeModule = require("node:module") as { _load: (request: string, ...rest: unknown[]) => unknown };
 const originalLoad = nodeModule._load;
@@ -72,13 +73,25 @@ describe("managed MCP version", () => {
                 calls.push(args);
                 if (args.includes("describe")) { return { exitCode: 1, stdout: "", stderr: "" }; }
                 if (args.includes("rev-parse")) { return { exitCode: 0, stdout: "abc1234", stderr: "" }; }
-                if (args.includes("log")) { return { exitCode: 0, stdout: "Maintenance", stderr: "" }; }
                 return { exitCode: 0, stdout: "https://example.test/repo.git", stderr: "" };
             };
             assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "v0.7.65");
             assert.ok(calls.some((args) => args.includes("--exact-match")));
             await fs.writeFile(path.join(repo, "pyproject.toml"), "[project]\ndynamic = ['version']\n");
             assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "commit abc1234");
+            assert.ok(!calls.some((args) => args.includes("log")));
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+    it("logs unreadable optional metadata and still resolves the runtime", async () => {
+        const { root, repo, client } = await fixture();
+        try {
+            output.length = 0;
+            await fs.mkdir(path.join(repo, "pyproject.toml"));
+            assert.equal((await client.getMcpRuntimeInfo()).mcpVersion, "desconocida (instalado por ZIP)");
+            assert.ok(output.some((line) => line.includes("Could not read MCP package metadata")));
         } finally {
             await fs.rm(root, { recursive: true, force: true });
         }

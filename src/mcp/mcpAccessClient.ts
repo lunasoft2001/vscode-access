@@ -216,28 +216,19 @@ export class McpAccessClient {
             };
         }
 
-        const [tagResult, commitResult, logResult, originResult] = await Promise.all([
+        const [tagResult, commitResult, originResult] = await Promise.all([
             this.runCommand("git", ["-C", repoDir, "describe", "--tags", "--exact-match", "HEAD"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "rev-parse", "--short", "HEAD"], undefined, true),
-            this.runCommand("git", ["-C", repoDir, "log", "-1", "--format=%s"], undefined, true),
             this.runCommand("git", ["-C", repoDir, "remote", "get-url", "origin"], undefined, true)
         ]);
 
-        // Try to extract version from commit message (e.g., "v0.7.43: wedged-session detection")
         let version = "sin tag";
         if (packageVersion) {
             version = packageVersion;
         } else if (tagResult.exitCode === 0) {
             version = tagResult.stdout || "sin tag";
-        } else if (logResult.exitCode === 0) {
-            const commitMsg = logResult.stdout || "";
-            const versionMatch = commitMsg.match(/v\d+\.\d+\.\d+/);
-            if (versionMatch) {
-                version = versionMatch[0];
-            } else {
-                // Fallback to commit hash if no version pattern found
-                version = `commit ${commitResult.stdout || "n/a"}`;
-            }
+        } else if (commitResult.exitCode === 0 && commitResult.stdout) {
+            version = `commit ${commitResult.stdout}`;
         }
 
         return {
@@ -387,7 +378,14 @@ export class McpAccessClient {
             return undefined;
         }
 
-        const content = fs.readFileSync(filePath, "utf8");
+        let content: string;
+        try {
+            content = fs.readFileSync(filePath, "utf8");
+        } catch (error) {
+            const details = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`Could not read MCP package metadata: ${details}`);
+            return undefined;
+        }
         let inProject = false;
         for (const line of content.split(/\r?\n/)) {
             const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
